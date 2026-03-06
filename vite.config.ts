@@ -9,7 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
-    include: ['jsmediatags'],
+    exclude: ['jsmediatags'],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
