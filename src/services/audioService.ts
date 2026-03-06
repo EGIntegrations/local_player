@@ -8,8 +8,48 @@ export class AudioService {
   private onLoadCallback?: (duration: number) => void;
   private progressInterval: number | null = null;
 
+  // Web Audio API for visualizations
+  private audioContext: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private sourceNode: MediaElementAudioSourceNode | null = null;
+  private connectedElement: HTMLMediaElement | null = null;
+
   constructor() {
     Howler.volume(this._volume);
+  }
+
+  getAnalyser(): AnalyserNode | null {
+    return this.analyser;
+  }
+
+  private connectAnalyser() {
+    if (!this.currentHowl) return;
+
+    // Howler exposes the underlying HTML audio element via _sounds[0]._node
+    const sounds = (this.currentHowl as any)._sounds;
+    if (!sounds || sounds.length === 0) return;
+    const audioElement: HTMLMediaElement | undefined = sounds[0]?._node;
+    if (!audioElement) return;
+
+    // Don't reconnect the same element
+    if (this.connectedElement === audioElement) return;
+
+    try {
+      if (!this.audioContext) {
+        this.audioContext = new AudioContext();
+      }
+
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.8;
+
+      this.sourceNode = this.audioContext.createMediaElementSource(audioElement);
+      this.sourceNode.connect(this.analyser);
+      this.analyser.connect(this.audioContext.destination);
+      this.connectedElement = audioElement;
+    } catch {
+      // May fail if element already connected - that's OK
+    }
   }
 
   loadTrack(url: string) {
@@ -18,16 +58,25 @@ export class AudioService {
       this.clearProgressInterval();
     }
 
+    // Reset source tracking so new element gets connected
+    this.connectedElement = null;
+    this.sourceNode = null;
+
     this.currentHowl = new Howl({
       src: [url],
       html5: true,
       volume: this._volume,
       onload: () => {
+        this.connectAnalyser();
         if (this.onLoadCallback && this.currentHowl) {
           this.onLoadCallback(this.currentHowl.duration());
         }
       },
       onplay: () => {
+        this.connectAnalyser();
+        if (this.audioContext?.state === 'suspended') {
+          this.audioContext.resume();
+        }
         this.startProgressInterval();
       },
       onpause: () => {
@@ -114,5 +163,10 @@ export class AudioService {
     this.stop();
     this.currentHowl?.unload();
     this.clearProgressInterval();
+    this.audioContext?.close();
+    this.audioContext = null;
+    this.analyser = null;
+    this.sourceNode = null;
+    this.connectedElement = null;
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { MiniPlayer } from './player/MiniPlayer';
+import { ExpandedPlayer } from './player/ExpandedPlayer';
 import { Library } from './library/Library';
 import { PlaylistManager } from './playlists/PlaylistManager';
 import { Settings } from './settings/Settings';
@@ -238,14 +239,26 @@ export function PlayerShell() {
 
           {activeView === 'player' && (
             <div className="max-w-2xl mx-auto bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-cosmic-light-teal/20">
-              <MiniPlayer
-                onPlay={handlePlay}
-                onPause={handlePause}
-                onNext={handleNext}
-                onPrevious={handlePrevious}
-                onSeek={handleSeek}
-                onVolumeChange={handleVolumeChange}
-              />
+              {playerMode === 'mini' ? (
+                <MiniPlayer
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onNext={handleNext}
+                  onPrevious={handlePrevious}
+                  onSeek={handleSeek}
+                  onVolumeChange={handleVolumeChange}
+                />
+              ) : (
+                <ExpandedPlayer
+                  analyser={audioRef.current?.getAnalyser() ?? null}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onNext={handleNext}
+                  onPrevious={handlePrevious}
+                  onSeek={handleSeek}
+                  onVolumeChange={handleVolumeChange}
+                />
+              )}
             </div>
           )}
 
