@@ -1,6 +1,5 @@
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind, Config};
 use std::path::Path;
-use std::sync::mpsc::channel;
 use tauri::{AppHandle, Emitter};
 
 pub fn watch_folder(app: AppHandle, folder_path: String) -> Result<RecommendedWatcher, String> {

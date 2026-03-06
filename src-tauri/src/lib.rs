@@ -4,7 +4,6 @@ mod file_watcher;
 
 use std::sync::Mutex;
 use notify::RecommendedWatcher;
-use tauri::Manager;
 
 struct WatcherState(Mutex<Option<RecommendedWatcher>>);
 
