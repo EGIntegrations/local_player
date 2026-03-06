@@ -9,7 +9,18 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
-    exclude: ['jsmediatags'],
+    include: ['jsmediatags/build2/jsmediatags.js'],
+    esbuildOptions: {
+      plugins: [{
+        name: 'externalize-react-native',
+        setup(build) {
+          build.onResolve({ filter: /^react-native-fs$/ }, () => ({
+            path: 'react-native-fs',
+            external: true,
+          }));
+        },
+      }],
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
