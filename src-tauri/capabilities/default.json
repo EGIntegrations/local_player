@@ -8,6 +8,11 @@
     "opener:default",
     "sql:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "**" }]
+    },
+    "fs:read-all"
   ]
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { MiniPlayer } from './player/MiniPlayer';
 import { ExpandedPlayer } from './player/ExpandedPlayer';
 import { Library } from './library/Library';
@@ -13,7 +14,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useUIStore } from '../stores/uiStore';
 import { AudioService } from '../services/audioService';
 import { parseID3Tags } from '../services/id3Parser';
-import { scanFolder, startWatchingFolder, readFileBytes } from '../services/tauriCommands';
+import { scanFolder, startWatchingFolder, readFileHeader } from '../services/tauriCommands';
 import * as db from '../services/database';
 
 type ToastInfo = { message: string; type: 'success' | 'error' | 'info' };
@@ -60,8 +61,8 @@ export function PlayerShell() {
   // Load track when currentTrack changes
   useEffect(() => {
     if (currentTrack && audioRef.current) {
-      // For local files, use convertFileSrc or direct path
-      audioRef.current.loadTrack(currentTrack.filePath);
+      const url = convertFileSrc(currentTrack.filePath);
+      audioRef.current.loadTrack(url);
       setTimeout(() => {
         audioRef.current?.play();
         setPlaying(true);
@@ -100,7 +101,7 @@ export function PlayerShell() {
       const existing = await db.getTrackByFilePath(filePath);
       if (existing) return;
 
-      const bytes = await readFileBytes(filePath);
+      const bytes = await readFileHeader(filePath);
       const buffer = new Uint8Array(bytes).buffer;
       const tags = await parseID3Tags(buffer);
 
@@ -137,8 +138,10 @@ export function PlayerShell() {
 
   const handleFolderSelected = async (folderPath: string) => {
     setMonitoredFolder(folderPath);
+    setSettingsVisible(false);
     await db.setSetting('monitored_folder', folderPath);
     setIsScanning(true);
+    setActiveView('library');
 
     try {
       const files = await scanFolder(folderPath);

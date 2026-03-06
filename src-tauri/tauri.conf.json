@@ -10,15 +10,16 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
-        "title": "local-player",
-        "width": 800,
-        "height": 600
+        "title": "Local Player",
+        "width": 900,
+        "height": 700
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data:"
     }
   },
   "bundle": {

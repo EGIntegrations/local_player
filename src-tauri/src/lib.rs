@@ -34,6 +34,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::file::scan_folder,
             commands::file::read_file_bytes,
+            commands::file::read_file_header,
             start_watching_folder,
         ])
         .run(tauri::generate_context!())

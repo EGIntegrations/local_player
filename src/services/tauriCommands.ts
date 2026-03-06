@@ -11,3 +11,7 @@ export async function startWatchingFolder(folderPath: string): Promise<void> {
 export async function readFileBytes(filePath: string): Promise<number[]> {
   return invoke<number[]>('read_file_bytes', { filePath });
 }
+
+export async function readFileHeader(filePath: string, maxBytes: number = 131072): Promise<number[]> {
+  return invoke<number[]>('read_file_header', { filePath, maxBytes });
+}

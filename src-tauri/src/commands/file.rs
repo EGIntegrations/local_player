@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 
 #[tauri::command]
@@ -35,4 +36,16 @@ fn collect_mp3s(dir: &Path, mp3_files: &mut Vec<String>) -> std::io::Result<()> 
 #[tauri::command]
 pub async fn read_file_bytes(file_path: String) -> Result<Vec<u8>, String> {
     fs::read(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))
+}
+
+/// Read only the first `max_bytes` of a file (for ID3 tag parsing).
+#[tauri::command]
+pub async fn read_file_header(file_path: String, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let mut file = File::open(&file_path)
+        .map_err(|e| format!("Failed to open {}: {}", file_path, e))?;
+    let mut buf = vec![0u8; max_bytes];
+    let n = file.read(&mut buf)
+        .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+    buf.truncate(n);
+    Ok(buf)
 }
