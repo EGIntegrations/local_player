@@ -1,4 +1,4 @@
-declare module 'jsmediatags' {
+declare module 'jsmediatags/build2/jsmediatags.js' {
   interface Tag {
     tags: {
       title?: string;

@@ -1,4 +1,4 @@
-import jsmediatags from 'jsmediatags';
+import jsmediatags from 'jsmediatags/build2/jsmediatags.js';
 
 export interface ID3Tags {
   title: string;
