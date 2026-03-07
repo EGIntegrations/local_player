@@ -23,6 +23,12 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,8 +45,32 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Validate macOS signing/notarization secrets
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=""
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!var:-}" ]]; then
+              missing="$missing $var"
+            fi
+          done
+          if [[ -n "$missing" ]]; then
+            echo "Missing required macOS release secrets:$missing"
+            echo "Without these, distributed macOS apps may be blocked as damaged/untrusted by Gatekeeper."
+            exit 1
+          fi
+
       - name: Build Tauri bundle
-        run: npm run tauri build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == "macos" ]]; then
+            npm run tauri build -- --bundles dmg
+          else
+            npm run tauri build -- --bundles nsis
+          fi
 
       - name: Prepare release assets
         shell: bash
@@ -54,13 +84,13 @@ jobs:
               FOUND=1
               base="$(basename "$file")"
               cp "$file" "release-assets/local-player-${VERSION}-${{ matrix.platform }}-${base}"
-            done < <(find src-tauri/target/release/bundle -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) -print0)
+            done < <(find src-tauri/target/release/bundle -type f -name "*.dmg" -print0)
           else
             while IFS= read -r -d '' file; do
               FOUND=1
               base="$(basename "$file")"
               cp "$file" "release-assets/local-player-${VERSION}-${{ matrix.platform }}-${base}"
-            done < <(find src-tauri/target/release/bundle -type f \( -name "*.msi" -o -name "*.exe" \) -print0)
+            done < <(find src-tauri/target/release/bundle -type f -name "*.exe" -print0)
           fi
 
           if [[ "$FOUND" -eq 0 ]]; then

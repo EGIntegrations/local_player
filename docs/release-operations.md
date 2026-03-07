@@ -8,11 +8,12 @@ Add these in GitHub repository settings:
 
 - `TAURI_PRIVATE_KEY`
 - `TAURI_KEY_PASSWORD`
-
-Optional (if you later enable platform code signing/notarization):
-
-- macOS notarization/signing secrets
-- Windows code-signing certificate secrets
+- `APPLE_CERTIFICATE` (base64-encoded `.p12` Developer ID Application cert)
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY` (for example `Developer ID Application: Your Name (TEAMID)`)
+- `APPLE_ID` (Apple developer account email)
+- `APPLE_PASSWORD` or `APPLE_APP_SPECIFIC_PASSWORD` (app-specific password)
+- `APPLE_TEAM_ID`
 
 ## 2) Versioning and tag
 
@@ -25,13 +26,18 @@ Optional (if you later enable platform code signing/notarization):
 Workflow file: `.github/workflows/release.yml`
 
 - Builds on `macos-latest` and `windows-latest`.
-- Produces standardized artifact names:
+- Produces direct installers:
+  - macOS: `.dmg`
+  - Windows: `.exe` (NSIS)
+- Standardized artifact names:
   - `local-player-<version>-macos-<original>`
   - `local-player-<version>-windows-<original>`
 - Generates:
   - `release-manifest.json`
   - `checksums.txt`
 - Publishes all assets to the matching GitHub Release.
+
+Note: GitHub Actions "Artifacts" downloads are always zipped containers. Use GitHub Release assets for direct `.dmg`/`.exe` downloads.
 
 ## 4) Manifest contract
 
