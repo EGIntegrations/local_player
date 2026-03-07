@@ -13,7 +13,7 @@ const sizeClasses = {
 export function AlbumArt({ url, album, size = 'lg' }: AlbumArtProps) {
   return (
     <div
-      className={`${sizeClasses[size]} bg-cosmic-teal rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0`}
+      className={`${sizeClasses[size]} flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-cosmic-light-teal/25 bg-cosmic-teal/90`}
     >
       {url ? (
         <img

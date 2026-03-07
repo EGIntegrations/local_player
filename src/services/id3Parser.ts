@@ -1,7 +1,7 @@
 import jsmediatags from 'jsmediatags/build2/jsmediatags.js';
 
 export interface ID3Tags {
-  title: string;
+  title: string | null;
   artist: string | null;
   album: string | null;
   year: number | null;
@@ -14,6 +14,7 @@ export function parseID3Tags(arrayBuffer: ArrayBuffer): Promise<ID3Tags> {
     jsmediatags.read(new Blob([arrayBuffer]), {
       onSuccess(tag) {
         const tags = tag.tags;
+        const parsedYear = tags.year ? parseInt(String(tags.year), 10) : NaN;
 
         let albumArt: string | null = null;
         if (tags.picture) {
@@ -27,10 +28,10 @@ export function parseID3Tags(arrayBuffer: ArrayBuffer): Promise<ID3Tags> {
         }
 
         resolve({
-          title: tags.title || 'Unknown',
+          title: tags.title ? String(tags.title).trim() : null,
           artist: tags.artist || null,
           album: tags.album || null,
-          year: tags.year ? parseInt(String(tags.year), 10) : null,
+          year: Number.isFinite(parsedYear) ? parsedYear : null,
           genre: tags.genre || null,
           albumArt,
         });

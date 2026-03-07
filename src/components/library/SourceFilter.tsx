@@ -17,10 +17,10 @@ export function SourceFilter() {
         <button
           key={f.value}
           onClick={() => setSourceFilter(f.value)}
-          className={`px-4 py-2 rounded-lg transition-colors ${
+          className={`terminal-tab px-4 py-2 transition-colors ${
             sourceFilter === f.value
-              ? 'bg-cosmic-orange text-white'
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              ? 'terminal-tab-active'
+              : ''
           }`}
         >
           {f.label}

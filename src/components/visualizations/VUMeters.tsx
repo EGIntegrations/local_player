@@ -5,64 +5,32 @@ interface VUMetersProps {
   isPlaying: boolean;
 }
 
-function MeterNeedle({ level }: { level: number }) {
-  // level is 0-1, map to angle: -45deg (silent) to +45deg (max)
-  const angle = -45 + level * 90;
+function MeterRow({ label, level, peak }: { label: 'L' | 'R'; level: number; peak: number }) {
+  const percent = Math.max(0, Math.min(100, Math.round(level * 100)));
+  const peakPercent = Math.max(0, Math.min(100, Math.round(peak * 100)));
 
   return (
-    <div className="relative w-32 h-20 overflow-hidden">
-      {/* Meter background */}
-      <div className="absolute inset-0 bg-gray-900/80 rounded-t-full border border-cosmic-teal/40">
-        {/* Scale markings */}
-        <svg viewBox="0 0 128 64" className="w-full h-full">
-          {/* Arc scale */}
-          <path
-            d="M 16 60 A 48 48 0 0 1 112 60"
-            fill="none"
-            stroke="rgba(222, 247, 249, 0.2)"
-            strokeWidth="1"
-          />
-          {/* Green zone (0 to -6dB) */}
-          <path
-            d="M 16 60 A 48 48 0 0 1 64 12"
-            fill="none"
-            stroke="rgba(34, 197, 94, 0.3)"
-            strokeWidth="3"
-          />
-          {/* Yellow zone (-6 to 0dB) */}
-          <path
-            d="M 64 12 A 48 48 0 0 1 96 28"
-            fill="none"
-            stroke="rgba(234, 179, 8, 0.3)"
-            strokeWidth="3"
-          />
-          {/* Red zone (0 to +3dB) */}
-          <path
-            d="M 96 28 A 48 48 0 0 1 112 60"
-            fill="none"
-            stroke="rgba(239, 68, 68, 0.3)"
-            strokeWidth="3"
-          />
-          {/* Scale labels */}
-          <text x="16" y="58" fill="rgba(222, 247, 249, 0.5)" fontSize="6" fontFamily="monospace">-20</text>
-          <text x="38" y="28" fill="rgba(222, 247, 249, 0.5)" fontSize="6" fontFamily="monospace">-10</text>
-          <text x="68" y="16" fill="rgba(222, 247, 249, 0.5)" fontSize="6" fontFamily="monospace">-3</text>
-          <text x="92" y="28" fill="rgba(234, 179, 8, 0.5)" fontSize="6" fontFamily="monospace">0</text>
-          <text x="106" y="48" fill="rgba(239, 68, 68, 0.5)" fontSize="6" fontFamily="monospace">+3</text>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between font-mono text-xs uppercase tracking-widest text-cosmic-light-teal/65">
+        <span>{label}</span>
+        <span>{percent}%</span>
+      </div>
+      <div className="relative h-6 rounded border border-cosmic-light-teal/35 bg-cosmic-teal/15 px-1 py-1">
+        <div className="absolute inset-1 flex gap-0.5 opacity-25">
+          {Array.from({ length: 24 }).map((_, i) => (
+            <div key={i} className="h-full w-full rounded-[1px] bg-cosmic-light-teal/45" />
+          ))}
+        </div>
 
-          {/* Needle */}
-          <line
-            x1="64"
-            y1="62"
-            x2={64 + 44 * Math.sin((angle * Math.PI) / 180)}
-            y2={62 - 44 * Math.cos((angle * Math.PI) / 180)}
-            stroke="#F4A261"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          {/* Needle pivot */}
-          <circle cx="64" cy="62" r="3" fill="#A84B2F" />
-        </svg>
+        <div
+          className="absolute inset-y-1 left-1 rounded bg-gradient-to-r from-cosmic-teal via-cosmic-apricot to-cosmic-orange transition-[width] duration-75"
+          style={{ width: `calc(${percent}% - 0.5rem)` }}
+        />
+
+        <div
+          className="absolute inset-y-1 w-0.5 rounded bg-cosmic-orange/95 transition-[left] duration-150"
+          style={{ left: `calc(${peakPercent}% - 0.125rem)` }}
+        />
       </div>
     </div>
   );
@@ -71,13 +39,16 @@ function MeterNeedle({ level }: { level: number }) {
 export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
   const [leftLevel, setLeftLevel] = useState(0);
   const [rightLevel, setRightLevel] = useState(0);
+  const [leftPeak, setLeftPeak] = useState(0);
+  const [rightPeak, setRightPeak] = useState(0);
   const animFrameRef = useRef<number>(0);
 
   useEffect(() => {
     if (!analyser || !isPlaying) {
-      // Decay to zero when not playing
-      setLeftLevel((prev) => prev * 0.9);
-      setRightLevel((prev) => prev * 0.9);
+      setLeftLevel((prev) => prev * 0.86);
+      setRightLevel((prev) => prev * 0.86);
+      setLeftPeak((prev) => prev * 0.96);
+      setRightPeak((prev) => prev * 0.96);
       return;
     }
 
@@ -88,31 +59,21 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
       animFrameRef.current = requestAnimationFrame(update);
       analyser.getByteFrequencyData(dataArray);
 
-      // Split into left/right channels (approximate with low/high freq)
       const mid = Math.floor(bufferLength / 2);
       let leftSum = 0;
       let rightSum = 0;
 
-      for (let i = 0; i < mid; i++) {
-        leftSum += dataArray[i];
-      }
-      for (let i = mid; i < bufferLength; i++) {
-        rightSum += dataArray[i];
-      }
+      for (let i = 0; i < mid; i++) leftSum += dataArray[i];
+      for (let i = mid; i < bufferLength; i++) rightSum += dataArray[i];
 
-      // Normalize to 0-1 with some smoothing
-      const rawLeft = leftSum / (mid * 255);
-      const rawRight = rightSum / ((bufferLength - mid) * 255);
+      const rawLeft = Math.min(1, (leftSum / (mid * 255)) * 2.4);
+      const rawRight = Math.min(1, (rightSum / ((bufferLength - mid) * 255)) * 2.4);
 
-      // Apply VU meter ballistics (slow attack, slower release)
-      setLeftLevel((prev) => {
-        const target = rawLeft * 2.5; // boost for visibility
-        return target > prev ? prev + (target - prev) * 0.3 : prev + (target - prev) * 0.08;
-      });
-      setRightLevel((prev) => {
-        const target = rawRight * 2.5;
-        return target > prev ? prev + (target - prev) * 0.3 : prev + (target - prev) * 0.08;
-      });
+      setLeftLevel((prev) => (rawLeft > prev ? prev + (rawLeft - prev) * 0.4 : prev + (rawLeft - prev) * 0.1));
+      setRightLevel((prev) => (rawRight > prev ? prev + (rawRight - prev) * 0.4 : prev + (rawRight - prev) * 0.1));
+
+      setLeftPeak((prev) => Math.max(rawLeft, prev * 0.985));
+      setRightPeak((prev) => Math.max(rawRight, prev * 0.985));
     };
 
     update();
@@ -123,17 +84,13 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
   }, [analyser, isPlaying]);
 
   return (
-    <div className="w-full">
-      <div className="text-xs text-gray-500 font-mono mb-1 uppercase tracking-wider">VU Meters</div>
-      <div className="flex justify-center gap-4">
-        <div className="text-center">
-          <MeterNeedle level={Math.min(1, leftLevel)} />
-          <div className="text-xs text-gray-500 font-mono mt-1">L</div>
-        </div>
-        <div className="text-center">
-          <MeterNeedle level={Math.min(1, rightLevel)} />
-          <div className="text-xs text-gray-500 font-mono mt-1">R</div>
-        </div>
+    <div className="w-full rounded-lg border border-cosmic-light-teal/30 bg-cosmic-teal/10 p-3">
+      <div className="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-cosmic-light-teal/70">
+        Stereo VU
+      </div>
+      <div className="space-y-3">
+        <MeterRow label="L" level={leftLevel} peak={leftPeak} />
+        <MeterRow label="R" level={rightLevel} peak={rightPeak} />
       </div>
     </div>
   );

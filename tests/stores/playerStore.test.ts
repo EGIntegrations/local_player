@@ -32,6 +32,8 @@ describe('playerStore', () => {
       progress: 0,
       duration: 0,
       queue: [],
+      playbackOrder: [],
+      playbackIndex: -1,
     });
   });
 
@@ -43,6 +45,8 @@ describe('playerStore', () => {
     expect(state.progress).toBe(0);
     expect(state.duration).toBe(0);
     expect(state.queue).toEqual([]);
+    expect(state.playbackOrder).toEqual([]);
+    expect(state.playbackIndex).toBe(-1);
   });
 
   it('should set current track', () => {
@@ -78,5 +82,28 @@ describe('playerStore', () => {
 
     usePlayerStore.getState().clearQueue();
     expect(usePlayerStore.getState().queue).toEqual([]);
+  });
+
+  it('should set playback context and current track', () => {
+    usePlayerStore.getState().setPlaybackContext([mockTrack, mockTrack2], 1);
+    const state = usePlayerStore.getState();
+    expect(state.playbackOrder).toEqual([mockTrack, mockTrack2]);
+    expect(state.playbackIndex).toBe(1);
+    expect(state.currentTrack).toEqual(mockTrack2);
+  });
+
+  it('should advance playback and stop at boundaries', () => {
+    usePlayerStore.getState().setPlaybackContext([mockTrack, mockTrack2], 0);
+    const movedForward = usePlayerStore.getState().advancePlayback(1);
+    expect(movedForward).toEqual(mockTrack2);
+    expect(usePlayerStore.getState().playbackIndex).toBe(1);
+
+    const atEnd = usePlayerStore.getState().advancePlayback(1);
+    expect(atEnd).toBeNull();
+    expect(usePlayerStore.getState().playbackIndex).toBe(1);
+
+    const movedBack = usePlayerStore.getState().advancePlayback(-1);
+    expect(movedBack).toEqual(mockTrack);
+    expect(usePlayerStore.getState().playbackIndex).toBe(0);
   });
 });

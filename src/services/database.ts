@@ -59,6 +59,18 @@ export async function deleteTrack(trackId: number): Promise<void> {
   await conn.execute('DELETE FROM tracks WHERE id = ?', [trackId]);
 }
 
+export async function updateTrackMetadata(
+  trackId: number,
+  params: { title: string; artist: string | null }
+): Promise<void> {
+  const conn = await getDb();
+  const now = Math.floor(Date.now() / 1000);
+  await conn.execute(
+    'UPDATE tracks SET title = ?, artist = ?, updated_at = ? WHERE id = ?',
+    [params.title, params.artist, now, trackId]
+  );
+}
+
 export async function getTrackByFilePath(filePath: string): Promise<Track | null> {
   const conn = await getDb();
   const rows = await conn.select<Track[]>(

@@ -23,10 +23,10 @@ export function SeekBar({ onSeek }: SeekBarProps) {
         step="0.1"
         value={progress}
         onChange={(e) => onSeek(parseFloat(e.target.value))}
-        className="w-full accent-cosmic-orange"
+        className="terminal-slider w-full"
         aria-label="Seek"
       />
-      <div className="flex justify-between text-xs text-gray-400 mt-1 font-mono">
+      <div className="mt-1 flex justify-between font-mono text-xs text-cosmic-light-teal/65">
         <span>{formatTime(progress)}</span>
         <span>{formatTime(duration)}</span>
       </div>

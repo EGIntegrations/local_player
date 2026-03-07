@@ -7,8 +7,7 @@ import * as db from '../../services/database';
 export function PlaylistManager() {
   const { playlists, setPlaylists, activePlaylist, setActivePlaylist, playlistTracks, setPlaylistTracks } =
     usePlaylistStore();
-  const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
-  const setQueue = usePlayerStore((s) => s.setQueue);
+  const setPlaybackContext = usePlayerStore((s) => s.setPlaybackContext);
   const [newName, setNewName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
@@ -44,55 +43,54 @@ export function PlaylistManager() {
 
   const handlePlayAll = () => {
     if (playlistTracks.length > 0) {
-      setCurrentTrack(playlistTracks[0]);
-      setQueue(playlistTracks.slice(1));
+      setPlaybackContext(playlistTracks, 0);
     }
   };
 
   return (
     <div className="space-y-4">
-      <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-cosmic-light-teal/20 p-6">
-        <h2 className="text-xl font-bold font-mono text-white mb-4">Create Playlist</h2>
+      <div className="panel p-6">
+        <h2 className="panel-title mb-4 text-xl font-bold font-mono">Create Playlist</h2>
         <div className="flex gap-2">
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Playlist name..."
-            className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+            className="terminal-input flex-1 px-4 py-2"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button
             onClick={handleCreate}
             disabled={isCreating || !newName.trim()}
-            className="px-6 py-2 bg-cosmic-orange hover:bg-cosmic-apricot disabled:bg-gray-600 rounded-lg transition-colors text-white"
+            className="terminal-btn terminal-btn-primary px-6 py-2"
           >
             Create
           </button>
         </div>
       </div>
 
-      <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-cosmic-light-teal/20 p-6">
-        <h2 className="text-xl font-bold font-mono text-white mb-4">Your Playlists</h2>
+      <div className="panel p-6">
+        <h2 className="panel-title mb-4 text-xl font-bold font-mono">Your Playlists</h2>
         {playlists.length === 0 ? (
-          <p className="text-gray-400">No playlists yet</p>
+          <p className="text-cosmic-light-teal/65">No playlists yet</p>
         ) : (
           <div className="space-y-2">
             {playlists.map((pl) => (
               <div
                 key={pl.id}
                 onClick={() => setActivePlaylist(pl)}
-                className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-                  activePlaylist?.id === pl.id ? 'bg-cosmic-teal/20' : 'hover:bg-gray-700'
+                className={`terminal-list-row flex cursor-pointer items-center justify-between rounded-lg p-3 ${
+                  activePlaylist?.id === pl.id ? 'terminal-list-row-active' : ''
                 }`}
               >
-                <span className="font-medium text-white">{pl.name}</span>
+                <span className="font-medium text-cosmic-light-teal">{pl.name}</span>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(pl.id);
                   }}
-                  className="p-1 hover:bg-red-600 rounded text-gray-400 hover:text-white"
+                  className="terminal-btn p-1 text-cosmic-light-teal/70 hover:text-red-200"
                 >
                   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                     <path
@@ -109,31 +107,36 @@ export function PlaylistManager() {
       </div>
 
       {activePlaylist && (
-        <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-cosmic-light-teal/20 p-6">
+        <div className="panel p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold font-mono text-white">{activePlaylist.name}</h2>
+            <h2 className="panel-title text-xl font-bold font-mono">{activePlaylist.name}</h2>
             <button
               onClick={handlePlayAll}
               disabled={playlistTracks.length === 0}
-              className="px-4 py-2 bg-cosmic-orange hover:bg-cosmic-apricot disabled:bg-gray-600 rounded-lg transition-colors text-white"
+              className="terminal-btn terminal-btn-primary px-4 py-2"
             >
               Play All
             </button>
           </div>
           {playlistTracks.length === 0 ? (
-            <p className="text-gray-400">No tracks in this playlist</p>
+            <p className="text-cosmic-light-teal/65">No tracks in this playlist</p>
           ) : (
             <div className="space-y-2">
               {playlistTracks.map((track) => (
                 <div
                   key={track.id}
-                  className="flex items-center gap-3 p-2 hover:bg-gray-700 rounded cursor-pointer"
-                  onClick={() => setCurrentTrack(track)}
+                  className="terminal-list-row flex cursor-pointer items-center gap-3 rounded p-2"
+                  onClick={() => {
+                    const index = playlistTracks.findIndex((candidate) => candidate.id === track.id);
+                    if (index >= 0) {
+                      setPlaybackContext(playlistTracks, index);
+                    }
+                  }}
                 >
                   <AlbumArt url={track.albumArtUrl} album={track.album} size="sm" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-white truncate">{track.title}</p>
-                    <p className="text-gray-400 text-sm truncate">{track.artist}</p>
+                    <p className="truncate text-cosmic-light-teal">{track.title}</p>
+                    <p className="truncate text-sm text-cosmic-light-teal/65">{track.artist}</p>
                   </div>
                 </div>
               ))}

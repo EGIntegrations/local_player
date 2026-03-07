@@ -2,23 +2,24 @@ import { useUIStore } from '../../stores/uiStore';
 import { FolderSelection } from './FolderSelection';
 
 interface SettingsProps {
-  onFolderSelected: (path: string) => void;
+  onFolderSelected: (path: string) => Promise<void> | void;
+  onFilesSelected: (paths: string[]) => Promise<void> | void;
 }
 
-export function Settings({ onFolderSelected }: SettingsProps) {
+export function Settings({ onFolderSelected, onFilesSelected }: SettingsProps) {
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
 
   if (!settingsVisible) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-2xl border border-cosmic-light-teal/20 p-6 max-w-2xl w-full mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm">
+      <div className="panel mx-4 w-full max-w-2xl p-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold font-mono text-white">Settings</h2>
+          <h2 className="panel-title text-2xl font-bold font-mono">Settings</h2>
           <button
             onClick={() => setSettingsVisible(false)}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
+            className="terminal-btn px-2 py-2"
           >
             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
               <path
@@ -32,13 +33,16 @@ export function Settings({ onFolderSelected }: SettingsProps) {
 
         <div className="space-y-6">
           <section>
-            <h3 className="text-lg font-semibold text-white mb-4">Local Library</h3>
-            <FolderSelection onFolderSelected={onFolderSelected} />
+            <h3 className="panel-title mb-4 text-lg font-semibold">Local Library</h3>
+            <FolderSelection onFolderSelected={onFolderSelected} onFilesSelected={onFilesSelected} />
+            <p className="mt-3 text-sm text-cosmic-light-teal/60">
+              You can monitor a whole folder or import selected MP3 files directly.
+            </p>
           </section>
 
           <section>
-            <h3 className="text-lg font-semibold text-white mb-4">Cloud Sources</h3>
-            <p className="text-gray-400 text-sm">
+            <h3 className="panel-title mb-4 text-lg font-semibold">Cloud Sources</h3>
+            <p className="text-sm text-cosmic-light-teal/60">
               Cloud integration (S3, Google Drive) coming soon...
             </p>
           </section>

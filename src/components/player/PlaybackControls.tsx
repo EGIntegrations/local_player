@@ -19,7 +19,7 @@ export function PlaybackControls({
     <div className="flex items-center justify-center gap-4">
       <button
         onClick={onPrevious}
-        className="p-2 hover:bg-cosmic-teal/20 rounded-full transition-colors text-white"
+        className="terminal-btn rounded-full p-2"
         aria-label="Previous track"
       >
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
@@ -29,7 +29,7 @@ export function PlaybackControls({
 
       <button
         onClick={isPlaying ? onPause : onPlay}
-        className="p-3 bg-cosmic-orange hover:bg-cosmic-apricot rounded-full transition-colors text-white"
+        className="terminal-btn terminal-btn-primary rounded-full p-3"
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? (
@@ -53,7 +53,7 @@ export function PlaybackControls({
 
       <button
         onClick={onNext}
-        className="p-2 hover:bg-cosmic-teal/20 rounded-full transition-colors text-white"
+        className="terminal-btn rounded-full p-2"
         aria-label="Next track"
       >
         <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">

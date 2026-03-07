@@ -16,11 +16,11 @@ export function SearchBar() {
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search tracks..."
-        className="w-full px-4 py-2 pl-10 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cosmic-orange"
+        placeholder="Query library..."
+        className="terminal-input w-full px-4 py-2 pl-10"
       />
       <svg
-        className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"
+        className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-cosmic-light-teal/60"
         fill="currentColor"
         viewBox="0 0 20 20"
       >

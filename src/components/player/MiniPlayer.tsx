@@ -25,9 +25,9 @@ export function MiniPlayer({
 
   if (!currentTrack) {
     return (
-      <div className="p-8 text-center text-gray-400">
+      <div className="p-8 text-center text-cosmic-light-teal/65">
         <p>No track playing</p>
-        <p className="text-sm mt-2">Select a track from the library to play</p>
+        <p className="mt-2 text-sm">Select a track from the library to play</p>
       </div>
     );
   }
@@ -43,12 +43,12 @@ export function MiniPlayer({
       </div>
 
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-white">{currentTrack.title}</h2>
-        <p className="text-gray-400">
+        <h2 className="text-xl font-semibold text-cosmic-light-teal">{currentTrack.title}</h2>
+        <p className="text-cosmic-light-teal/75">
           {currentTrack.artist || 'Unknown Artist'}
         </p>
         {currentTrack.album && (
-          <p className="text-sm text-gray-500">{currentTrack.album}</p>
+          <p className="text-sm text-cosmic-light-teal/55">{currentTrack.album}</p>
         )}
       </div>
 

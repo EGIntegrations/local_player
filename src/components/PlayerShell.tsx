@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { readFile } from '@tauri-apps/plugin-fs';
+import { animate } from 'animejs';
 import { MiniPlayer } from './player/MiniPlayer';
 import { ExpandedPlayer } from './player/ExpandedPlayer';
 import { Library } from './library/Library';
@@ -18,24 +20,106 @@ import { scanFolder, startWatchingFolder, readFileHeader } from '../services/tau
 import * as db from '../services/database';
 
 type ToastInfo = { message: string; type: 'success' | 'error' | 'info' };
+type FileProcessingResult = {
+  status: 'added' | 'existing' | 'failed';
+  error?: string;
+};
+
+function normalizeFileSystemPath(inputPath: string): string {
+  if (!inputPath.startsWith('file://')) return inputPath;
+  try {
+    const url = new URL(inputPath);
+    let normalized = decodeURIComponent(url.pathname);
+    if (/^\/[A-Za-z]:/.test(normalized)) {
+      normalized = normalized.slice(1);
+    }
+    return normalized || inputPath;
+  } catch {
+    return inputPath;
+  }
+}
+
+function fallbackTitleFromPath(filePath: string): string {
+  const normalized = normalizeFileSystemPath(filePath).replace(/\\/g, '/');
+  const fileName = normalized.split('/').pop() ?? filePath;
+  const title = fileName.replace(/\.mp3$/i, '').trim();
+  return title || 'Unknown Track';
+}
+
+function parseFilenameMetadata(filePath: string): { title: string; artist: string | null } {
+  const normalized = normalizeFileSystemPath(filePath).replace(/\\/g, '/');
+  const fileName = normalized.split('/').pop() ?? filePath;
+  const stem = fileName.replace(/\.mp3$/i, '').trim();
+  if (!stem) return { title: 'Unknown Track', artist: null };
+
+  const parts = stem.split(' - ').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const artist = parts[0] || null;
+    const title = parts.slice(1).join(' - ').trim() || stem;
+    return { title, artist };
+  }
+
+  return { title: stem, artist: null };
+}
+
+function chooseTitle(tagTitle: string | null | undefined, filePath: string): string {
+  const normalized = tagTitle?.trim() ?? '';
+  if (!normalized || /^unknown$/i.test(normalized)) {
+    return parseFilenameMetadata(filePath).title;
+  }
+  return normalized;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
 
 export function PlayerShell() {
   const audioRef = useRef<AudioService | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const playbackBlobUrlRef = useRef<string | null>(null);
+  const playbackRequestRef = useRef(0);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   const {
     currentTrack,
+    progress,
     setPlaying,
     setProgress,
     setDuration,
-    queue,
-    setCurrentTrack,
-    setQueue,
     setVolume,
+    advancePlayback,
   } = usePlayerStore();
   const { setTracks, addTrack: addTrackToLibrary } = useLibraryStore();
   const setMonitoredFolder = useSettingsStore((s) => s.setMonitoredFolder);
   const { activeView, setActiveView, setSettingsVisible, togglePlayerMode, playerMode } = useUIStore();
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+
+  const startPlayback = useCallback(
+    async (showErrorToast = true): Promise<string | null> => {
+      if (!audioRef.current) return 'Audio service unavailable';
+      try {
+        await audioRef.current.playWithConfirm();
+        setPlaying(true);
+        setAnalyserNode(audioRef.current.getAnalyser());
+        return null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setPlaying(false);
+        if (showErrorToast) {
+          setToast({ message: `Playback error: ${message}`, type: 'error' });
+        }
+        return message;
+      }
+    },
+    [setPlaying],
+  );
 
   // Initialize audio service
   useEffect(() => {
@@ -45,34 +129,125 @@ export function PlayerShell() {
     audio.onProgress((p) => setProgress(p));
     audio.onEnd(() => {
       setPlaying(false);
-      // Auto-advance to next track
-      const { queue } = usePlayerStore.getState();
-      if (queue.length > 0) {
-        const next = queue[0];
-        setCurrentTrack(next);
-        setQueue(queue.slice(1));
+      const nextTrack = advancePlayback(1);
+      if (!nextTrack) {
+        setPlaying(false);
       }
     });
-    audio.onLoad((dur) => setDuration(dur));
+    audio.onLoad((dur) => {
+      setDuration(dur);
+      setAnalyserNode(audio.getAnalyser());
+    });
+    audio.onError((message) => {
+      console.error('Audio playback error:', message);
+    });
+    audio.onDebug((message) => {
+      console.debug(`[AudioService] ${message}`);
+    });
 
     return () => audio.cleanup();
-  }, [setProgress, setPlaying, setDuration, setCurrentTrack, setQueue]);
+  }, [advancePlayback, setDuration, setPlaying, setProgress]);
+
+  useEffect(() => {
+    return () => {
+      if (playbackBlobUrlRef.current) {
+        URL.revokeObjectURL(playbackBlobUrlRef.current);
+        playbackBlobUrlRef.current = null;
+      }
+    };
+  }, []);
 
   // Load track when currentTrack changes
   useEffect(() => {
-    if (currentTrack && audioRef.current) {
-      const url = convertFileSrc(currentTrack.filePath);
-      audioRef.current.loadTrack(url);
-      setTimeout(() => {
-        audioRef.current?.play();
-        setPlaying(true);
-      }, 100);
-    }
-  }, [currentTrack, setPlaying]);
+    if (!currentTrack || !audioRef.current) return;
+
+    let cancelled = false;
+    const loadTrack = async () => {
+      const normalizedPath = normalizeFileSystemPath(currentTrack.filePath);
+      const requestId = ++playbackRequestRef.current;
+      const loadErrors: string[] = [];
+      let bytes: Uint8Array | null = null;
+      setProgress(0);
+      setDuration(0);
+      try {
+        bytes = await readFile(normalizedPath);
+      } catch (error) {
+        const readError = error instanceof Error ? error.message : String(error);
+        loadErrors.push(`fs-read failed (${readError})`);
+      }
+
+      const sources: { kind: 'blob' | 'asset' | 'data'; url: string }[] = [];
+      if (bytes && bytes.length > 0) {
+        if (playbackBlobUrlRef.current) {
+          URL.revokeObjectURL(playbackBlobUrlRef.current);
+          playbackBlobUrlRef.current = null;
+        }
+        const audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
+        playbackBlobUrlRef.current = URL.createObjectURL(audioBlob);
+        sources.push({ kind: 'blob', url: playbackBlobUrlRef.current });
+      }
+      sources.push({ kind: 'asset', url: convertFileSrc(normalizedPath) });
+      if (bytes && bytes.length > 0) {
+        sources.push({ kind: 'data', url: `data:audio/mpeg;base64,${bytesToBase64(bytes)}` });
+      }
+
+      for (const source of sources) {
+        if (cancelled || !audioRef.current || requestId !== playbackRequestRef.current) return;
+        try {
+          await audioRef.current.loadTrack(source.url);
+          if (cancelled || !audioRef.current || requestId !== playbackRequestRef.current) return;
+          const playbackError = await startPlayback(false);
+          if (playbackError) {
+            loadErrors.push(`${source.kind} play failed (${playbackError})`);
+            continue;
+          }
+          return;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          loadErrors.push(`${source.kind} failed (${message})`);
+        }
+      }
+
+      if (cancelled || requestId !== playbackRequestRef.current) return;
+      setPlaying(false);
+      setToast({ message: `Playback error: ${loadErrors.join(' | ')}`, type: 'error' });
+    };
+
+    loadTrack().catch((err) => {
+      console.error('Error loading track:', err);
+      setToast({ message: `Playback setup error: ${String(err)}`, type: 'error' });
+      setPlaying(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrack, setDuration, setPlaying, setProgress, startPlayback]);
 
   // Load library on startup
   useEffect(() => {
-    db.getAllTracks().then(setTracks).catch(console.error);
+    const loadLibrary = async () => {
+      const existingTracks = await db.getAllTracks();
+      // Backfill legacy imports that were stored as "Unknown" before filename fallback.
+      for (const track of existingTracks) {
+        const unknownTitle = !track.title || /^unknown$/i.test(track.title.trim());
+        const unknownArtist = !track.artist || /^unknown artist$/i.test(track.artist.trim());
+        if (!unknownTitle && !unknownArtist) continue;
+
+        const fallback = parseFilenameMetadata(track.filePath);
+        const nextTitle = unknownTitle ? fallback.title : track.title;
+        const nextArtist = unknownArtist ? fallback.artist : track.artist;
+        await db.updateTrackMetadata(track.id, {
+          title: nextTitle || fallbackTitleFromPath(track.filePath),
+          artist: nextArtist ?? null,
+        });
+      }
+
+      const refreshed = await db.getAllTracks();
+      setTracks(refreshed);
+    };
+
+    loadLibrary().catch(console.error);
   }, [setTracks]);
 
   // Load saved folder setting
@@ -95,68 +270,106 @@ export function PlayerShell() {
     };
   }, []);
 
-  const processNewFile = useCallback(async (filePath: string) => {
+  const processNewFile = useCallback(async (filePath: string): Promise<FileProcessingResult> => {
     try {
-      // Check if already in library
-      const existing = await db.getTrackByFilePath(filePath);
-      if (existing) return;
+      const normalizedPath = normalizeFileSystemPath(filePath);
 
-      const bytes = await readFileHeader(filePath);
-      const buffer = new Uint8Array(bytes).buffer;
-      const tags = await parseID3Tags(buffer);
+      // Check if already in library
+      const existing = await db.getTrackByFilePath(normalizedPath);
+      if (existing) return { status: 'existing' };
+
+      let tags: Awaited<ReturnType<typeof parseID3Tags>> | null = null;
+      try {
+        const bytes = await readFileHeader(normalizedPath);
+        const buffer = new Uint8Array(bytes).buffer;
+        tags = await parseID3Tags(buffer);
+      } catch (headerErr) {
+        console.warn('ID3 parse failed; importing with fallback metadata:', normalizedPath, headerErr);
+      }
+
+      const title = chooseTitle(tags?.title, normalizedPath);
+      const fallback = parseFilenameMetadata(normalizedPath);
+      const normalizedArtist = tags?.artist?.trim();
+      const artist = normalizedArtist && !/^unknown artist$/i.test(normalizedArtist)
+        ? normalizedArtist
+        : fallback.artist;
+      const safeYear = Number.isFinite(tags?.year) ? tags?.year ?? null : null;
 
       const id = await db.addTrack({
-        title: tags.title,
-        artist: tags.artist,
-        album: tags.album,
-        year: tags.year,
-        genre: tags.genre,
+        title,
+        artist,
+        album: tags?.album ?? null,
+        year: safeYear,
+        genre: tags?.genre ?? null,
         duration: null,
-        filePath,
+        filePath: normalizedPath,
         source: 'local',
-        albumArtUrl: tags.albumArt,
+        albumArtUrl: tags?.albumArt ?? null,
       });
 
       addTrackToLibrary({
         id,
-        title: tags.title,
-        artist: tags.artist,
-        album: tags.album,
-        year: tags.year,
-        genre: tags.genre,
+        title,
+        artist,
+        album: tags?.album ?? null,
+        year: safeYear,
+        genre: tags?.genre ?? null,
         duration: 0,
-        filePath,
+        filePath: normalizedPath,
         source: 'local',
-        albumArtUrl: tags.albumArt,
+        albumArtUrl: tags?.albumArt ?? null,
         createdAt: Math.floor(Date.now() / 1000),
         updatedAt: Math.floor(Date.now() / 1000),
       });
+      return { status: 'added' };
     } catch (err) {
       console.error('Error processing file:', filePath, err);
+      const message = err instanceof Error ? err.message : String(err);
+      return { status: 'failed', error: message };
     }
   }, [addTrackToLibrary]);
 
+  const importFilesIntoLibrary = useCallback(async (files: string[]) => {
+    let added = 0;
+    let existing = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+
+    for (const filePath of files.map(normalizeFileSystemPath)) {
+      const result = await processNewFile(filePath);
+      if (result.status === 'added') added += 1;
+      if (result.status === 'existing') existing += 1;
+      if (result.status === 'failed') {
+        failed += 1;
+        if (!firstError && result.error) firstError = result.error;
+      }
+    }
+
+    const tracks = await db.getAllTracks();
+    setTracks(tracks);
+
+    return { added, existing, failed, total: files.length, libraryCount: tracks.length, firstError };
+  }, [processNewFile, setTracks]);
+
   const handleFolderSelected = async (folderPath: string) => {
-    setMonitoredFolder(folderPath);
+    const normalizedFolder = normalizeFileSystemPath(folderPath);
+    setMonitoredFolder(normalizedFolder);
     setSettingsVisible(false);
-    await db.setSetting('monitored_folder', folderPath);
+    await db.setSetting('monitored_folder', normalizedFolder);
     setIsScanning(true);
     setActiveView('library');
 
     try {
-      const files = await scanFolder(folderPath);
+      const files = await scanFolder(normalizedFolder);
       setToast({ message: `Found ${files.length} MP3 files. Scanning...`, type: 'info' });
 
-      for (const filePath of files) {
-        await processNewFile(filePath);
-      }
+      const summary = await importFilesIntoLibrary(files);
 
-      // Refresh library from DB
-      const tracks = await db.getAllTracks();
-      setTracks(tracks);
-
-      await startWatchingFolder(folderPath);
-      setToast({ message: `Library loaded: ${tracks.length} tracks`, type: 'success' });
+      await startWatchingFolder(normalizedFolder);
+      const summaryText = summary.failed > 0
+        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
+        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing)`;
+      setToast({ message: summaryText, type: 'success' });
     } catch (err) {
       setToast({ message: `Error scanning folder: ${err}`, type: 'error' });
     } finally {
@@ -164,23 +377,61 @@ export function PlayerShell() {
     }
   };
 
+  const handleFilesSelected = async (paths: string[]) => {
+    setSettingsVisible(false);
+    setIsScanning(true);
+    setActiveView('library');
+
+    try {
+      const mp3Files = paths
+        .map(normalizeFileSystemPath)
+        .filter((path) => /\.mp3$/i.test(path));
+      if (mp3Files.length === 0) {
+        setToast({ message: 'No .mp3 files selected', type: 'error' });
+        return;
+      }
+
+      setToast({ message: `Adding ${mp3Files.length} selected files...`, type: 'info' });
+      const summary = await importFilesIntoLibrary(mp3Files);
+      const summaryText = summary.failed > 0
+        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
+        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing)`;
+      setToast({ message: summaryText, type: 'success' });
+    } catch (err) {
+      setToast({ message: `Error adding files: ${err}`, type: 'error' });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handlePlay = () => {
-    audioRef.current?.play();
-    setPlaying(true);
+    void startPlayback();
   };
   const handlePause = () => {
     audioRef.current?.pause();
     setPlaying(false);
   };
   const handleNext = () => {
-    if (queue.length > 0) {
-      setCurrentTrack(queue[0]);
-      setQueue(queue.slice(1));
+    const nextTrack = advancePlayback(1);
+    if (!nextTrack) {
+      audioRef.current?.pause();
+      setPlaying(false);
     }
   };
   const handlePrevious = () => {
-    audioRef.current?.seek(0);
-    setProgress(0);
+    const liveProgress = audioRef.current?.getSeek() ?? progress;
+    if (liveProgress > 3) {
+      audioRef.current?.seek(0);
+      setProgress(0);
+      void startPlayback();
+      return;
+    }
+    const previousTrack = advancePlayback(-1);
+    if (!previousTrack) {
+      audioRef.current?.seek(0);
+      setProgress(0);
+      void startPlayback();
+    }
   };
   const handleSeek = (pos: number) => {
     audioRef.current?.seek(pos);
@@ -191,28 +442,65 @@ export function PlayerShell() {
     setVolume(vol);
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 via-cosmic-teal to-gray-900 text-white">
-      {/* Cosmic background effects */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cosmic-orange/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cosmic-light-teal/10 rounded-full blur-3xl" />
-      </div>
+  useEffect(() => {
+    if (!shellRef.current) return;
+    const surfaces = shellRef.current.querySelectorAll<HTMLElement>('.js-surface');
+    if (surfaces.length === 0) return;
+    const animation = animate(surfaces, {
+      opacity: [0, 1],
+      translateY: [14, 0],
+      delay: (_el, i) => i * 60,
+      duration: 520,
+      ease: 'out(3)',
+    });
+    return () => {
+      animation.pause();
+    };
+  }, []);
 
-      <div className="relative z-10 container mx-auto px-4 py-8">
+  useEffect(() => {
+    if (!shellRef.current) return;
+    const activePanel = shellRef.current.querySelector('.js-active-panel');
+    if (!activePanel) return;
+    const animation = animate(activePanel, {
+      opacity: [0.65, 1],
+      scale: [0.99, 1],
+      duration: 320,
+      ease: 'out(3)',
+    });
+    return () => {
+      animation.pause();
+    };
+  }, [activeView, playerMode, currentTrack?.id]);
+
+  return (
+    <div className="app-shell screen-flicker" ref={shellRef}>
+      <div className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {/* Header */}
-        <header className="mb-8 flex justify-between items-center">
-          <h1 className="text-3xl font-bold font-mono tracking-wider">LOCAL PLAYER</h1>
+        <header className="js-surface mb-8 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="signal-dot" />
+              <p className="soft-label">Audio Node Active</p>
+            </div>
+            <h1 className="mt-2 text-3xl font-bold font-mono tracking-[0.18em] text-cosmic-light-teal">
+              Local Player
+            </h1>
+          </div>
+
           <div className="flex gap-2">
             <button
-              onClick={togglePlayerMode}
-              className="px-4 py-2 bg-cosmic-teal/30 hover:bg-cosmic-teal/50 rounded-lg transition-colors text-sm"
+              onClick={() => {
+                setActiveView('player');
+                togglePlayerMode();
+              }}
+              className="terminal-btn px-4 py-2"
             >
               {playerMode === 'mini' ? 'Expand' : 'Minimize'}
             </button>
             <button
               onClick={() => setSettingsVisible(true)}
-              className="px-4 py-2 bg-cosmic-teal/30 hover:bg-cosmic-teal/50 rounded-lg transition-colors text-sm"
+              className="terminal-btn px-4 py-2"
             >
               Settings
             </button>
@@ -220,15 +508,15 @@ export function PlayerShell() {
         </header>
 
         {/* Navigation */}
-        <nav className="flex gap-2 mb-8">
+        <nav className="js-surface mb-8 flex gap-2">
           {(['player', 'library', 'playlists'] as const).map((view) => (
             <button
               key={view}
               onClick={() => setActiveView(view)}
-              className={`px-4 py-2 rounded-lg transition-colors capitalize ${
+              className={`terminal-tab px-4 py-2 transition-colors ${
                 activeView === view
-                  ? 'bg-cosmic-orange text-white'
-                  : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50'
+                  ? 'terminal-tab-active'
+                  : ''
               }`}
             >
               {view}
@@ -237,11 +525,11 @@ export function PlayerShell() {
         </nav>
 
         {/* Main content */}
-        <main className="max-w-4xl mx-auto">
+        <main className="js-surface mx-auto max-w-5xl">
           {isScanning && <LoadingSpinner />}
 
           {activeView === 'player' && (
-            <div className="max-w-2xl mx-auto bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-cosmic-light-teal/20">
+            <div className={`js-active-panel panel mx-auto transition-all ${playerMode === 'mini' ? 'max-w-2xl' : 'max-w-5xl'}`}>
               {playerMode === 'mini' ? (
                 <MiniPlayer
                   onPlay={handlePlay}
@@ -253,7 +541,7 @@ export function PlayerShell() {
                 />
               ) : (
                 <ExpandedPlayer
-                  analyser={audioRef.current?.getAnalyser() ?? null}
+                  analyser={analyserNode}
                   onPlay={handlePlay}
                   onPause={handlePause}
                   onNext={handleNext}
@@ -265,12 +553,12 @@ export function PlayerShell() {
             </div>
           )}
 
-          {activeView === 'library' && <Library />}
-          {activeView === 'playlists' && <PlaylistManager />}
+          {activeView === 'library' && <div className="js-active-panel"><Library /></div>}
+          {activeView === 'playlists' && <div className="js-active-panel"><PlaylistManager /></div>}
         </main>
       </div>
 
-      <Settings onFolderSelected={handleFolderSelected} />
+      <Settings onFolderSelected={handleFolderSelected} onFilesSelected={handleFilesSelected} />
 
       {toast && (
         <Toast

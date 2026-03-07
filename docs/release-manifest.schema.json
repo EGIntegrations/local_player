@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local-player.dev/schemas/release-manifest.schema.json",
+  "title": "Local Player Release Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "version", "artifacts"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["os", "arch", "fileName", "sha256", "downloadUrl"],
+        "properties": {
+          "os": {
+            "type": "string",
+            "enum": ["macos", "windows", "unknown"]
+          },
+          "arch": {
+            "type": "string",
+            "enum": ["x64", "arm64", "unknown"]
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

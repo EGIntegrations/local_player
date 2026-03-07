@@ -28,7 +28,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
       ctx.clearRect(0, 0, width, height);
 
       // Background grid lines (retro feel)
-      ctx.strokeStyle = 'rgba(11, 54, 60, 0.3)';
+      ctx.strokeStyle = 'rgba(143, 253, 192, 0.18)';
       ctx.lineWidth = 1;
       for (let i = 0; i < 5; i++) {
         const y = (height / 5) * i;
@@ -40,9 +40,9 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
 
       // Waveform
       const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, '#A84B2F');
-      gradient.addColorStop(0.5, '#F4A261');
-      gradient.addColorStop(1, '#A84B2F');
+      gradient.addColorStop(0, '#8ffdc0');
+      gradient.addColorStop(0.5, '#ffd88f');
+      gradient.addColorStop(1, '#8ffdc0');
 
       ctx.lineWidth = 2;
       ctx.strokeStyle = gradient;
@@ -68,7 +68,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
 
       // Glow effect
       ctx.shadowBlur = 8;
-      ctx.shadowColor = '#F4A261';
+      ctx.shadowColor = '#ffd88f';
       ctx.stroke();
       ctx.shadowBlur = 0;
     };
@@ -79,7 +79,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
       // Draw flat line when paused
       const { width, height } = canvas;
       ctx.clearRect(0, 0, width, height);
-      ctx.strokeStyle = 'rgba(168, 75, 47, 0.4)';
+      ctx.strokeStyle = 'rgba(143, 253, 192, 0.4)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, height / 2);
@@ -94,12 +94,12 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
 
   return (
     <div className="w-full">
-      <div className="text-xs text-gray-500 font-mono mb-1 uppercase tracking-wider">Waveform</div>
+      <div className="mb-1 font-mono text-xs uppercase tracking-wider text-cosmic-light-teal/60">Waveform</div>
       <canvas
         ref={canvasRef}
         width={500}
         height={80}
-        className="w-full h-20 rounded-lg bg-gray-900/50 border border-cosmic-teal/30"
+        className="h-20 w-full rounded-lg border border-cosmic-light-teal/25 bg-cosmic-teal/80"
       />
     </div>
   );
