@@ -48,21 +48,25 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p release-assets
+          FOUND=0
           if [[ "${{ matrix.platform }}" == "macos" ]]; then
-            mapfile -t FILES < <(find src-tauri/target/release/bundle -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \))
+            while IFS= read -r -d '' file; do
+              FOUND=1
+              base="$(basename "$file")"
+              cp "$file" "release-assets/local-player-${VERSION}-${{ matrix.platform }}-${base}"
+            done < <(find src-tauri/target/release/bundle -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) -print0)
           else
-            mapfile -t FILES < <(find src-tauri/target/release/bundle -type f \( -name "*.msi" -o -name "*.exe" \))
+            while IFS= read -r -d '' file; do
+              FOUND=1
+              base="$(basename "$file")"
+              cp "$file" "release-assets/local-player-${VERSION}-${{ matrix.platform }}-${base}"
+            done < <(find src-tauri/target/release/bundle -type f \( -name "*.msi" -o -name "*.exe" \) -print0)
           fi
 
-          if [[ ${#FILES[@]} -eq 0 ]]; then
+          if [[ "$FOUND" -eq 0 ]]; then
             echo "No bundle artifacts found for ${{ matrix.platform }}"
             exit 1
           fi
-
-          for file in "${FILES[@]}"; do
-            base="$(basename "$file")"
-            cp "$file" "release-assets/local-player-${VERSION}-${{ matrix.platform }}-${base}"
-          done
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
