@@ -11,6 +11,8 @@ import { VUMeters } from '../visualizations/VUMeters';
 
 interface ExpandedPlayerProps {
   analyser: AnalyserNode | null;
+  leftAnalyser: AnalyserNode | null;
+  rightAnalyser: AnalyserNode | null;
   equalizer: EqualizerState;
   onPlay: () => void;
   onPause: () => void;
@@ -78,6 +80,8 @@ function Fader({
 
 export function ExpandedPlayer({
   analyser,
+  leftAnalyser,
+  rightAnalyser,
   equalizer,
   onPlay,
   onPause,
@@ -124,7 +128,7 @@ export function ExpandedPlayer({
 
         <div className="js-expand-surface space-y-4">
           <Waveform analyser={null} isPlaying={false} />
-          <VUMeters analyser={null} isPlaying={false} />
+          <VUMeters analyser={null} leftAnalyser={null} rightAnalyser={null} isPlaying={false} />
         </div>
 
         <div className="text-center">
@@ -170,7 +174,7 @@ export function ExpandedPlayer({
       {/* Visualizations */}
       <div className="js-expand-surface space-y-4 rounded-lg border border-cosmic-light-teal/20 bg-cosmic-teal/10 p-4">
         <Waveform analyser={analyser} isPlaying={isPlaying} />
-        <VUMeters analyser={analyser} isPlaying={isPlaying} />
+        <VUMeters analyser={analyser} leftAnalyser={leftAnalyser} rightAnalyser={rightAnalyser} isPlaying={isPlaying} />
       </div>
 
       <div className="js-expand-surface sk-panel sk-eq-panel p-4">

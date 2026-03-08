@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePlaylistStore } from '../../stores/playlistStore';
 import { usePlayerStore } from '../../stores/playerStore';
+import { useLibraryStore } from '../../stores/libraryStore';
 import { AlbumArt } from '../player/AlbumArt';
 import * as db from '../../services/database';
 
@@ -8,7 +9,10 @@ export function PlaylistManager() {
   const { playlists, setPlaylists, activePlaylist, setActivePlaylist, playlistTracks, setPlaylistTracks } =
     usePlaylistStore();
   const setPlaybackContext = usePlayerStore((s) => s.setPlaybackContext);
+  const libraryTracks = useLibraryStore((s) => s.tracks);
   const [newName, setNewName] = useState('');
+  const [trackSearch, setTrackSearch] = useState('');
+  const [isAddingTrackId, setIsAddingTrackId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -44,6 +48,34 @@ export function PlaylistManager() {
   const handlePlayAll = () => {
     if (playlistTracks.length > 0) {
       setPlaybackContext(playlistTracks, 0);
+    }
+  };
+
+  const availableTracks = useMemo(() => {
+    const existingIds = new Set(playlistTracks.map((track) => track.id));
+    const q = trackSearch.trim().toLowerCase();
+    return libraryTracks
+      .filter((track) => !existingIds.has(track.id))
+      .filter((track) => {
+        if (!q) return true;
+        return (
+          track.title.toLowerCase().includes(q) ||
+          track.artist?.toLowerCase().includes(q) ||
+          track.album?.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 50);
+  }, [libraryTracks, playlistTracks, trackSearch]);
+
+  const handleAddTrack = async (trackId: number) => {
+    if (!activePlaylist) return;
+    setIsAddingTrackId(trackId);
+    try {
+      await db.addTrackToPlaylist(activePlaylist.id, trackId, playlistTracks.length);
+      const updatedTracks = await db.getPlaylistTracks(activePlaylist.id);
+      setPlaylistTracks(updatedTracks);
+    } finally {
+      setIsAddingTrackId(null);
     }
   };
 
@@ -107,41 +139,78 @@ export function PlaylistManager() {
       </div>
 
       {activePlaylist && (
-        <div className="panel p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="panel-title text-xl font-bold font-mono">{activePlaylist.name}</h2>
-            <button
-              onClick={handlePlayAll}
-              disabled={playlistTracks.length === 0}
-              className="terminal-btn terminal-btn-primary px-4 py-2"
-            >
-              Play All
-            </button>
-          </div>
-          {playlistTracks.length === 0 ? (
-            <p className="text-cosmic-light-teal/65">No tracks in this playlist</p>
-          ) : (
-            <div className="space-y-2">
-              {playlistTracks.map((track) => (
-                <div
-                  key={track.id}
-                  className="terminal-list-row flex cursor-pointer items-center gap-3 rounded p-2"
-                  onClick={() => {
-                    const index = playlistTracks.findIndex((candidate) => candidate.id === track.id);
-                    if (index >= 0) {
-                      setPlaybackContext(playlistTracks, index);
-                    }
-                  }}
-                >
-                  <AlbumArt url={track.albumArtUrl} album={track.album} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-cosmic-light-teal">{track.title}</p>
-                    <p className="truncate text-sm text-cosmic-light-teal/65">{track.artist}</p>
-                  </div>
-                </div>
-              ))}
+        <div className="space-y-4">
+          <div className="panel p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="panel-title text-xl font-bold font-mono">{activePlaylist.name}</h2>
+              <button
+                onClick={handlePlayAll}
+                disabled={playlistTracks.length === 0}
+                className="terminal-btn terminal-btn-primary px-4 py-2"
+              >
+                Play All
+              </button>
             </div>
-          )}
+            {playlistTracks.length === 0 ? (
+              <p className="text-cosmic-light-teal/65">No tracks in this playlist yet</p>
+            ) : (
+              <div className="space-y-2">
+                {playlistTracks.map((track) => (
+                  <div
+                    key={track.id}
+                    className="terminal-list-row flex cursor-pointer items-center gap-3 rounded p-2"
+                    onClick={() => {
+                      const index = playlistTracks.findIndex((candidate) => candidate.id === track.id);
+                      if (index >= 0) {
+                        setPlaybackContext(playlistTracks, index);
+                      }
+                    }}
+                  >
+                    <AlbumArt url={track.albumArtUrl} album={track.album} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="truncate text-cosmic-light-teal">{track.title}</p>
+                      <p className="truncate text-sm text-cosmic-light-teal/65">{track.artist}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="panel p-6">
+            <h3 className="panel-title mb-3 text-lg font-semibold">Add Tracks</h3>
+            <input
+              type="text"
+              value={trackSearch}
+              onChange={(event) => setTrackSearch(event.target.value)}
+              placeholder="Search library to add..."
+              className="terminal-input mb-3 w-full px-3 py-2"
+            />
+            {libraryTracks.length === 0 ? (
+              <p className="text-cosmic-light-teal/65">Import tracks in Library first.</p>
+            ) : availableTracks.length === 0 ? (
+              <p className="text-cosmic-light-teal/65">No matching tracks available to add.</p>
+            ) : (
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {availableTracks.map((track) => (
+                  <div key={track.id} className="terminal-list-row flex items-center gap-3 rounded p-2">
+                    <AlbumArt url={track.albumArtUrl} album={track.album} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-cosmic-light-teal">{track.title}</p>
+                      <p className="truncate text-sm text-cosmic-light-teal/65">{track.artist || 'Unknown Artist'}</p>
+                    </div>
+                    <button
+                      onClick={() => handleAddTrack(track.id)}
+                      disabled={isAddingTrackId === track.id}
+                      className="terminal-btn px-3 py-1 text-xs"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

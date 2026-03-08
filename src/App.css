@@ -27,6 +27,9 @@
   --sk-cool: rgba(119, 151, 189, 0.2);
   --font-ui: "Avenir Next", "Segoe UI", "Inter", sans-serif;
   --font-display: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
+  --viz-waveform: #8cb6f5;
+  --viz-vu: #f0b078;
+  --viz-grid: rgba(140, 182, 245, 0.28);
 }
 
 :root[data-theme="dark"] {
@@ -47,6 +50,9 @@
   --sk-cool: rgba(111, 136, 176, 0.18);
   --font-ui: "Avenir Next", "Segoe UI", "Inter", sans-serif;
   --font-display: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
+  --viz-waveform: #8cb6f5;
+  --viz-vu: #f0b078;
+  --viz-grid: rgba(140, 182, 245, 0.28);
 }
 
 * {
@@ -336,6 +342,27 @@ body {
   background: linear-gradient(180deg, color-mix(in srgb, var(--sk-bg-hi) 84%, #fff), color-mix(in srgb, var(--sk-panel) 75%, var(--sk-bg-low)));
 }
 
+.sk-color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sk-border) 26%, transparent);
+  background: color-mix(in srgb, var(--sk-panel) 70%, transparent);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.sk-color-input {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid color-mix(in srgb, var(--sk-border) 72%, transparent);
+  border-radius: 0.25rem;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .toast-shell {
   border-radius: 0.28rem;
   border: 1.5px solid color-mix(in srgb, var(--sk-border) 72%, transparent);
@@ -373,6 +400,19 @@ body {
   box-shadow:
     inset 0 2px 4px color-mix(in srgb, var(--sk-shadow-low) 45%, transparent),
     inset 0 0 0 1px color-mix(in srgb, var(--sk-shadow-hi) 25%, transparent);
+}
+
+.vu-fill {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--viz-vu) 22%, transparent),
+    color-mix(in srgb, var(--viz-vu) 78%, #fff),
+    color-mix(in srgb, var(--viz-vu) 92%, #111)
+  );
+}
+
+.vu-peak {
+  background: color-mix(in srgb, var(--viz-vu) 70%, #fff);
 }
 
 .eq-rack {

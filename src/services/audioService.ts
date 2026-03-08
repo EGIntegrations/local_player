@@ -24,6 +24,9 @@ export class AudioService {
   // Web Audio API for visualizations
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private leftAnalyser: AnalyserNode | null = null;
+  private rightAnalyser: AnalyserNode | null = null;
+  private stereoSplitter: ChannelSplitterNode | null = null;
   private preampNode: GainNode | null = null;
   private outputNode: GainNode | null = null;
   private eqNodes: BiquadFilterNode[] = [];
@@ -46,6 +49,13 @@ export class AudioService {
     return this.analyser;
   }
 
+  getStereoAnalysers(): { left: AnalyserNode | null; right: AnalyserNode | null } {
+    return {
+      left: this.leftAnalyser,
+      right: this.rightAnalyser,
+    };
+  }
+
   private emitDebug(message: string) {
     this.onDebugCallback?.(message);
   }
@@ -62,14 +72,27 @@ export class AudioService {
 
     if (!this.analyser) {
       this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
+      this.analyser.fftSize = 1024;
       this.analyser.smoothingTimeConstant = 0.8;
+    }
+    if (!this.leftAnalyser) {
+      this.leftAnalyser = this.audioContext.createAnalyser();
+      this.leftAnalyser.fftSize = 1024;
+      this.leftAnalyser.smoothingTimeConstant = 0.78;
+    }
+    if (!this.rightAnalyser) {
+      this.rightAnalyser = this.audioContext.createAnalyser();
+      this.rightAnalyser.fftSize = 1024;
+      this.rightAnalyser.smoothingTimeConstant = 0.78;
     }
     if (!this.preampNode) {
       this.preampNode = this.audioContext.createGain();
     }
     if (!this.outputNode) {
       this.outputNode = this.audioContext.createGain();
+    }
+    if (!this.stereoSplitter) {
+      this.stereoSplitter = this.audioContext.createChannelSplitter(2);
     }
     if (this.eqNodes.length === 0) {
       this.eqNodes = EQ_FREQUENCIES.map((frequency) => {
@@ -88,8 +111,11 @@ export class AudioService {
         cursor = eqNode;
       }
       cursor.connect(this.outputNode);
+      this.outputNode.connect(this.audioContext.destination);
       this.outputNode.connect(this.analyser);
-      this.analyser.connect(this.audioContext.destination);
+      this.outputNode.connect(this.stereoSplitter);
+      this.stereoSplitter.connect(this.leftAnalyser, 0);
+      this.stereoSplitter.connect(this.rightAnalyser, 1);
       this.graphInitialized = true;
     }
 
@@ -391,15 +417,22 @@ export class AudioService {
     this.graphInitialized = false;
     this.preampNode?.disconnect();
     this.outputNode?.disconnect();
+    this.stereoSplitter?.disconnect();
+    this.analyser?.disconnect();
+    this.leftAnalyser?.disconnect();
+    this.rightAnalyser?.disconnect();
     this.eqNodes.forEach((node) => node.disconnect());
     this.preampNode = null;
     this.outputNode = null;
+    this.stereoSplitter = null;
     this.eqNodes = [];
     this.currentHowl?.unload();
     this.clearProgressInterval();
     this.audioContext?.close();
     this.audioContext = null;
     this.analyser = null;
+    this.leftAnalyser = null;
+    this.rightAnalyser = null;
     this.sourceNode = null;
   }
 }

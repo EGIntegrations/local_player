@@ -16,9 +16,8 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const css = getComputedStyle(document.documentElement);
-    const accent = css.getPropertyValue('--sk-accent').trim() || '#d08a43';
-    const accentSoft = css.getPropertyValue('--sk-accent-soft').trim() || '#e8c89e';
-    const textDim = css.getPropertyValue('--sk-text-dim').trim() || '#64707a';
+    const waveColor = css.getPropertyValue('--viz-waveform').trim() || '#8cb6f5';
+    const gridColor = css.getPropertyValue('--viz-grid').trim() || '#64707a';
 
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -32,7 +31,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
       ctx.clearRect(0, 0, width, height);
 
       // Background grid lines (retro feel)
-      ctx.strokeStyle = textDim;
+      ctx.strokeStyle = gridColor;
       ctx.globalAlpha = 0.22;
       ctx.lineWidth = 1;
       for (let i = 0; i < 5; i++) {
@@ -45,13 +44,8 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
       ctx.globalAlpha = 1;
 
       // Waveform
-      const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, accentSoft);
-      gradient.addColorStop(0.5, accent);
-      gradient.addColorStop(1, accentSoft);
-
       ctx.lineWidth = 2;
-      ctx.strokeStyle = gradient;
+      ctx.strokeStyle = waveColor;
       ctx.beginPath();
 
       const sliceWidth = width / bufferLength;
@@ -74,7 +68,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
 
       // Glow effect
       ctx.shadowBlur = 8;
-      ctx.shadowColor = accent;
+      ctx.shadowColor = waveColor;
       ctx.stroke();
       ctx.shadowBlur = 0;
     };
@@ -85,7 +79,7 @@ export function Waveform({ analyser, isPlaying }: WaveformProps) {
       // Draw flat line when paused
       const { width, height } = canvas;
       ctx.clearRect(0, 0, width, height);
-      ctx.strokeStyle = textDim;
+      ctx.strokeStyle = gridColor;
       ctx.globalAlpha = 0.5;
       ctx.lineWidth = 2;
       ctx.beginPath();

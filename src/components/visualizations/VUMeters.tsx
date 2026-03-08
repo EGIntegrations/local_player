@@ -2,6 +2,8 @@ import { useRef, useEffect, useState } from 'react';
 
 interface VUMetersProps {
   analyser: AnalyserNode | null;
+  leftAnalyser?: AnalyserNode | null;
+  rightAnalyser?: AnalyserNode | null;
   isPlaying: boolean;
 }
 
@@ -23,12 +25,12 @@ function MeterRow({ label, level, peak }: { label: 'L' | 'R'; level: number; pea
         </div>
 
         <div
-          className="absolute inset-y-1 left-1 rounded bg-gradient-to-r from-cosmic-teal via-cosmic-apricot to-cosmic-orange transition-[width] duration-75"
+          className="vu-fill absolute inset-y-1 left-1 rounded transition-[width] duration-75"
           style={{ width: `calc(${percent}% - 0.5rem)` }}
         />
 
         <div
-          className="absolute inset-y-1 w-0.5 rounded bg-cosmic-orange/95 transition-[left] duration-150"
+          className="vu-peak absolute inset-y-1 w-0.5 rounded transition-[left] duration-150"
           style={{ left: `calc(${peakPercent}% - 0.125rem)` }}
         />
       </div>
@@ -36,7 +38,18 @@ function MeterRow({ label, level, peak }: { label: 'L' | 'R'; level: number; pea
   );
 }
 
-export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
+function getLevel(analyser: AnalyserNode, buffer: Uint8Array): number {
+  analyser.getByteTimeDomainData(buffer);
+  let sumSquares = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const sample = (buffer[i] - 128) / 128;
+    sumSquares += sample * sample;
+  }
+  const rms = Math.sqrt(sumSquares / buffer.length);
+  return Math.min(1, rms * 4.6);
+}
+
+export function VUMeters({ analyser, leftAnalyser = null, rightAnalyser = null, isPlaying }: VUMetersProps) {
   const [leftLevel, setLeftLevel] = useState(0);
   const [rightLevel, setRightLevel] = useState(0);
   const [leftPeak, setLeftPeak] = useState(0);
@@ -44,7 +57,7 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
   const animFrameRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!analyser || !isPlaying) {
+    if (!isPlaying || (!analyser && !leftAnalyser && !rightAnalyser)) {
       setLeftLevel((prev) => prev * 0.86);
       setRightLevel((prev) => prev * 0.86);
       setLeftPeak((prev) => prev * 0.96);
@@ -52,22 +65,22 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
       return;
     }
 
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const leftSource = leftAnalyser ?? analyser;
+    const rightSource = rightAnalyser ?? analyser;
+    if (!leftSource || !rightSource) return;
+
+    const leftBuffer = new Uint8Array(leftSource.fftSize);
+    const rightBuffer = new Uint8Array(rightSource.fftSize);
 
     const update = () => {
       animFrameRef.current = requestAnimationFrame(update);
-      analyser.getByteFrequencyData(dataArray);
 
-      const mid = Math.floor(bufferLength / 2);
-      let leftSum = 0;
-      let rightSum = 0;
-
-      for (let i = 0; i < mid; i++) leftSum += dataArray[i];
-      for (let i = mid; i < bufferLength; i++) rightSum += dataArray[i];
-
-      const rawLeft = Math.min(1, (leftSum / (mid * 255)) * 2.4);
-      const rawRight = Math.min(1, (rightSum / ((bufferLength - mid) * 255)) * 2.4);
+      const rawLeft = getLevel(leftSource, leftBuffer);
+      let rawRight = getLevel(rightSource, rightBuffer);
+      // For mono sources, keep both meters moving instead of pinning one side.
+      if (rightAnalyser && rawRight < 0.02 && rawLeft > 0.05) {
+        rawRight = rawLeft * 0.94;
+      }
 
       setLeftLevel((prev) => (rawLeft > prev ? prev + (rawLeft - prev) * 0.4 : prev + (rawLeft - prev) * 0.1));
       setRightLevel((prev) => (rawRight > prev ? prev + (rawRight - prev) * 0.4 : prev + (rawRight - prev) * 0.1));
@@ -81,7 +94,7 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
     return () => {
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [analyser, isPlaying]);
+  }, [analyser, isPlaying, leftAnalyser, rightAnalyser]);
 
   return (
     <div className="sk-panel w-full rounded-xl border border-cosmic-light-teal/30 bg-cosmic-teal/10 p-3">

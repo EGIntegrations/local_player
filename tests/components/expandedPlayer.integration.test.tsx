@@ -45,6 +45,8 @@ describe('ExpandedPlayer equalizer rack', () => {
     render(
       <ExpandedPlayer
         analyser={null}
+        leftAnalyser={null}
+        rightAnalyser={null}
         equalizer={eqState}
         onPlay={() => undefined}
         onPause={() => undefined}

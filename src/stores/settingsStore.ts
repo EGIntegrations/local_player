@@ -1,17 +1,36 @@
 import { create } from 'zustand';
-import { EqualizerState, ResolvedTheme, Settings, ThemeMode } from '../types/settings';
+import { EqualizerState, ResolvedTheme, Settings, ThemeMode, VisualizerColors } from '../types/settings';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
 const DEFAULT_BANDS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const DEFAULT_VIS_COLORS: VisualizerColors = {
+  waveform: '#8cb6f5',
+  vu: '#f0b078',
+};
+
 const DEFAULT_EQ: EqualizerState = {
   bands: [...DEFAULT_BANDS],
   preampDb: 0,
   output: 1,
   bypass: false,
 };
+
+function normalizeColorHex(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized;
+  return fallback;
+}
+
+function normalizeVisualizerColors(partial: Partial<VisualizerColors> | null | undefined): VisualizerColors {
+  return {
+    waveform: normalizeColorHex(partial?.waveform, DEFAULT_VIS_COLORS.waveform),
+    vu: normalizeColorHex(partial?.vu, DEFAULT_VIS_COLORS.vu),
+  };
+}
 
 function normalizeEqState(partial: Partial<EqualizerState> | null | undefined): EqualizerState {
   const bandSource = Array.isArray(partial?.bands) ? partial?.bands : DEFAULT_BANDS;
@@ -40,6 +59,9 @@ interface SettingsState extends Settings {
   setEqOutput: (output: number) => void;
   setEqBypass: (enabled: boolean) => void;
   resetEq: () => void;
+  setVisualizerColors: (colors: Partial<VisualizerColors>) => void;
+  setWaveformColor: (color: string) => void;
+  setVuColor: (color: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -49,6 +71,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   themeMode: 'system',
   resolvedTheme: 'light',
   equalizer: { ...DEFAULT_EQ, bands: [...DEFAULT_EQ.bands] },
+  visualizerColors: { ...DEFAULT_VIS_COLORS },
 
   setMonitoredFolder: (folder) => set({ monitoredFolder: folder }),
   setS3Configured: (configured) => set({ s3Configured: configured }),
@@ -77,10 +100,23 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set((state) => ({ equalizer: normalizeEqState({ ...state.equalizer, bypass: enabled }) })),
   resetEq: () =>
     set(() => ({ equalizer: { ...DEFAULT_EQ, bands: [...DEFAULT_EQ.bands] } })),
+  setVisualizerColors: (colors) =>
+    set((state) => ({
+      visualizerColors: normalizeVisualizerColors({ ...state.visualizerColors, ...colors }),
+    })),
+  setWaveformColor: (color) =>
+    set((state) => ({
+      visualizerColors: normalizeVisualizerColors({ ...state.visualizerColors, waveform: color }),
+    })),
+  setVuColor: (color) =>
+    set((state) => ({
+      visualizerColors: normalizeVisualizerColors({ ...state.visualizerColors, vu: color }),
+    })),
 }));
 
 export const settingsDefaults = {
   equalizer: { ...DEFAULT_EQ, bands: [...DEFAULT_EQ.bands] },
+  visualizerColors: { ...DEFAULT_VIS_COLORS },
   getResolvedTheme: (mode: ThemeMode, prefersDark: boolean): ResolvedTheme =>
     mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode,
 };

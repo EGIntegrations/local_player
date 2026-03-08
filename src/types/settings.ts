@@ -8,6 +8,11 @@ export interface EqualizerState {
   bypass: boolean;
 }
 
+export interface VisualizerColors {
+  waveform: string;
+  vu: string;
+}
+
 export interface Settings {
   monitoredFolder: string | null;
   s3Configured: boolean;
@@ -15,6 +20,7 @@ export interface Settings {
   themeMode: ThemeMode;
   resolvedTheme: ResolvedTheme;
   equalizer: EqualizerState;
+  visualizerColors: VisualizerColors;
 }
 
 export interface S3Config {

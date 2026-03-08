@@ -15,6 +15,10 @@ describe('settingsStore', () => {
         output: 1,
         bypass: false,
       },
+      visualizerColors: {
+        waveform: '#8cb6f5',
+        vu: '#f0b078',
+      },
     });
   });
 
@@ -25,6 +29,8 @@ describe('settingsStore', () => {
     expect(state.driveConfigured).toBe(false);
     expect(state.themeMode).toBe('system');
     expect(state.resolvedTheme).toBe('light');
+    expect(state.visualizerColors.waveform).toBe('#8cb6f5');
+    expect(state.visualizerColors.vu).toBe('#f0b078');
   });
 
   it('should set monitored folder', () => {
@@ -81,5 +87,15 @@ describe('settingsStore', () => {
     expect(eq.preampDb).toBe(0);
     expect(eq.output).toBe(1);
     expect(eq.bypass).toBe(false);
+  });
+
+  it('should set visualizer colors', () => {
+    useSettingsStore.getState().setWaveformColor('#00ff00');
+    useSettingsStore.getState().setVuColor('#ff00ff');
+    expect(useSettingsStore.getState().visualizerColors.waveform).toBe('#00ff00');
+    expect(useSettingsStore.getState().visualizerColors.vu).toBe('#ff00ff');
+
+    useSettingsStore.getState().setVisualizerColors({ waveform: 'bad-value' });
+    expect(useSettingsStore.getState().visualizerColors.waveform).toBe('#8cb6f5');
   });
 });

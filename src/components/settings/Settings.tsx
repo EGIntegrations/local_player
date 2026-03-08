@@ -13,6 +13,9 @@ export function Settings({ onFolderSelected, onFilesSelected }: SettingsProps) {
   const themeMode = useSettingsStore((s) => s.themeMode);
   const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const visualizerColors = useSettingsStore((s) => s.visualizerColors);
+  const setWaveformColor = useSettingsStore((s) => s.setWaveformColor);
+  const setVuColor = useSettingsStore((s) => s.setVuColor);
 
   if (!settingsVisible) return null;
 
@@ -52,6 +55,30 @@ export function Settings({ onFolderSelected, onFilesSelected }: SettingsProps) {
             <p className="mt-2 text-xs text-cosmic-light-teal/65">
               Active theme: {resolvedTheme}
             </p>
+          </section>
+
+          <section>
+            <h3 className="panel-title mb-3 text-lg font-semibold">Visualizer Colors</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="sk-color-row">
+                <span className="soft-label">Waveform</span>
+                <input
+                  type="color"
+                  value={visualizerColors.waveform}
+                  onChange={(event) => setWaveformColor(event.target.value)}
+                  className="sk-color-input"
+                />
+              </label>
+              <label className="sk-color-row">
+                <span className="soft-label">Stereo VU</span>
+                <input
+                  type="color"
+                  value={visualizerColors.vu}
+                  onChange={(event) => setVuColor(event.target.value)}
+                  className="sk-color-input"
+                />
+              </label>
+            </div>
           </section>
 
           <section>

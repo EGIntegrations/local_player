@@ -26,6 +26,7 @@ type FileProcessingResult = {
 };
 const THEME_MODE_KEY = 'theme_mode';
 const EQ_STATE_KEY = 'equalizer_state';
+const VISUALIZER_COLORS_KEY = 'visualizer_colors';
 
 function isThemeMode(value: string | null): value is 'light' | 'dark' | 'system' {
   return value === 'light' || value === 'dark' || value === 'system';
@@ -86,12 +87,26 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return `rgba(120, 120, 120, ${alpha})`;
+  const int = Number.parseInt(normalized, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export function PlayerShell() {
   const audioRef = useRef<AudioService | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const playbackBlobUrlRef = useRef<string | null>(null);
   const playbackRequestRef = useRef(0);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  const [stereoAnalysers, setStereoAnalysers] = useState<{ left: AnalyserNode | null; right: AnalyserNode | null }>({
+    left: null,
+    right: null,
+  });
   const {
     currentTrack,
     progress,
@@ -115,6 +130,8 @@ export function PlayerShell() {
   const setEqOutput = useSettingsStore((s) => s.setEqOutput);
   const setEqBypass = useSettingsStore((s) => s.setEqBypass);
   const resetEq = useSettingsStore((s) => s.resetEq);
+  const visualizerColors = useSettingsStore((s) => s.visualizerColors);
+  const setVisualizerColors = useSettingsStore((s) => s.setVisualizerColors);
   const { activeView, setActiveView, setSettingsVisible, togglePlayerMode, playerMode } = useUIStore();
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -126,6 +143,7 @@ export function PlayerShell() {
         await audioRef.current.playWithConfirm();
         setPlaying(true);
         setAnalyserNode(audioRef.current.getAnalyser());
+        setStereoAnalysers(audioRef.current.getStereoAnalysers());
         return null;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -162,6 +180,7 @@ export function PlayerShell() {
     audio.onLoad((dur) => {
       setDuration(dur);
       setAnalyserNode(audio.getAnalyser());
+      setStereoAnalysers(audio.getStereoAnalysers());
     });
     audio.onError((message) => {
       console.error('Audio playback error:', message);
@@ -298,9 +317,10 @@ export function PlayerShell() {
   useEffect(() => {
     let cancelled = false;
     const loadUiSettings = async () => {
-      const [storedThemeMode, storedEq] = await Promise.all([
+      const [storedThemeMode, storedEq, storedColors] = await Promise.all([
         db.getSetting(THEME_MODE_KEY),
         db.getSetting(EQ_STATE_KEY),
+        db.getSetting(VISUALIZER_COLORS_KEY),
       ]);
 
       if (!cancelled && isThemeMode(storedThemeMode)) {
@@ -317,13 +337,24 @@ export function PlayerShell() {
           console.warn('Failed to parse saved equalizer state:', err);
         }
       }
+
+      if (!cancelled && storedColors) {
+        try {
+          const parsed = JSON.parse(storedColors);
+          if (parsed && typeof parsed === 'object') {
+            setVisualizerColors(parsed);
+          }
+        } catch (err) {
+          console.warn('Failed to parse saved visualizer colors:', err);
+        }
+      }
     };
 
     loadUiSettings().catch(console.error);
     return () => {
       cancelled = true;
     };
-  }, [setEqState, setThemeMode]);
+  }, [setEqState, setThemeMode, setVisualizerColors]);
 
   useEffect(() => {
     db.setSetting(THEME_MODE_KEY, themeMode).catch(console.error);
@@ -332,6 +363,10 @@ export function PlayerShell() {
   useEffect(() => {
     db.setSetting(EQ_STATE_KEY, JSON.stringify(equalizer)).catch(console.error);
   }, [equalizer]);
+
+  useEffect(() => {
+    db.setSetting(VISUALIZER_COLORS_KEY, JSON.stringify(visualizerColors)).catch(console.error);
+  }, [visualizerColors]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -355,6 +390,13 @@ export function PlayerShell() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', resolvedTheme);
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--viz-waveform', visualizerColors.waveform);
+    root.style.setProperty('--viz-vu', visualizerColors.vu);
+    root.style.setProperty('--viz-grid', hexToRgba(visualizerColors.waveform, 0.28));
+  }, [visualizerColors]);
 
   // Listen for file watcher events
   useEffect(() => {
@@ -592,10 +634,6 @@ export function PlayerShell() {
         {/* Header */}
         <header className="js-surface mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="signal-dot" />
-              <p className="soft-label">Audio Node Active</p>
-            </div>
             <h1 className="brand-title mt-2 text-4xl text-cosmic-light-teal">
               Local Player
             </h1>
@@ -667,6 +705,8 @@ export function PlayerShell() {
               ) : (
                 <ExpandedPlayer
                   analyser={analyserNode}
+                  leftAnalyser={stereoAnalysers.left}
+                  rightAnalyser={stereoAnalysers.right}
                   equalizer={equalizer}
                   onPlay={handlePlay}
                   onPause={handlePause}

@@ -62,6 +62,12 @@ describe('AudioService', () => {
     expect(audio.getAnalyser()).toBeNull();
   });
 
+  it('should return null stereo analysers initially', () => {
+    const stereo = audio.getStereoAnalysers();
+    expect(stereo.left).toBeNull();
+    expect(stereo.right).toBeNull();
+  });
+
   it('should register callbacks', () => {
     const progressCb = vi.fn();
     const endCb = vi.fn();
