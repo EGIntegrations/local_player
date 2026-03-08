@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { animate } from 'animejs';
 import { usePlayerStore } from '../../stores/playerStore';
+import { EqualizerState } from '../../types/settings';
 import { AlbumArt } from './AlbumArt';
 import { PlaybackControls } from './PlaybackControls';
 import { SeekBar } from './SeekBar';
@@ -10,79 +11,85 @@ import { VUMeters } from '../visualizations/VUMeters';
 
 interface ExpandedPlayerProps {
   analyser: AnalyserNode | null;
+  equalizer: EqualizerState;
   onPlay: () => void;
   onPause: () => void;
   onNext: () => void;
   onPrevious: () => void;
   onSeek: (position: number) => void;
   onVolumeChange: (volume: number) => void;
+  onEqBandChange: (index: number, gainDb: number) => void;
+  onEqPreampChange: (gainDb: number) => void;
+  onEqOutputChange: (output: number) => void;
+  onEqBypassChange: (enabled: boolean) => void;
+  onEqReset: () => void;
+}
+const EQ_BAND_LABELS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+
+function formatDb(value: number): string {
+  const rounded = Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+  if (Math.abs(rounded) < 0.05) return '0 dB';
+  return `${rounded > 0 ? '+' : ''}${rounded} dB`;
 }
 
-function SynthKnob({ label, value, isPlaying }: { label: string; value: number; isPlaying: boolean }) {
-  const pointerRef = useRef<HTMLDivElement | null>(null);
-  const baseRotation = -135 + value * 270;
-
-  useEffect(() => {
-    if (!pointerRef.current) return;
-    const intro = animate(pointerRef.current, {
-      rotate: [baseRotation - 18, baseRotation],
-      duration: 520,
-      ease: 'out(3)',
-    });
-
-    let idle: { pause: () => void } | null = null;
-    if (isPlaying) {
-      idle = animate(pointerRef.current, {
-        rotate: [baseRotation - 5, baseRotation + 5],
-        duration: 1800,
-        ease: 'inOutSine',
-        loop: true,
-        alternate: true,
-      });
-    }
-
-    return () => {
-      intro.pause();
-      idle?.pause();
-    };
-  }, [baseRotation, isPlaying]);
+function Fader({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  display,
+  centerMarker = true,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+  display: string;
+  centerMarker?: boolean;
+}) {
+  const percent = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
 
   return (
-    <div className="text-center js-knob">
-      <div className="relative mx-auto h-20 w-20 rounded-full border-2 border-cosmic-light-teal/45 bg-cosmic-teal/25 shadow-[inset_0_6px_12px_rgba(0,0,0,0.18)]">
-        {Array.from({ length: 13 }).map((_, index) => {
-          const rotation = -135 + index * 22.5;
-          return (
-            <div
-              key={index}
-              className="absolute left-1/2 top-1/2 h-1 w-0.5 origin-bottom bg-cosmic-light-teal/65"
-              style={{
-                transform: `translate(-50%, -125%) rotate(${rotation}deg)`,
-              }}
-            />
-          );
-        })}
-        <div className="absolute inset-[11px] rounded-full border border-cosmic-light-teal/35 bg-[linear-gradient(150deg,rgba(243,210,165,0.35),rgba(58,121,115,0.45))]" />
-        <div
-          ref={pointerRef}
-          className="absolute h-[2px] w-8 rounded bg-cosmic-orange shadow-[0_0_8px_rgba(225,131,58,0.4)]"
-          style={{ top: '50%', left: '50%', transformOrigin: '0% 50%', transform: `rotate(${baseRotation}deg)` }}
+    <div className="eq-fader">
+      <div className="eq-fader-value">{display}</div>
+      <div className="eq-fader-slot">
+        <div className="eq-fader-track" />
+        {centerMarker && <div className="eq-fader-center" />}
+        <div className="eq-fader-cap" style={{ bottom: `calc(${percent}% - 0.4rem)` }} />
+        <input
+          aria-label={`${label} fader`}
+          className="eq-fader-input"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(Number(event.target.value))}
         />
-        <div className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cosmic-light-teal/60 bg-cosmic-apricot" />
       </div>
-      <div className="mt-2 font-mono text-xs uppercase tracking-widest text-cosmic-light-teal/70">{label}</div>
+      <div className="eq-fader-label">{label}</div>
     </div>
   );
 }
 
 export function ExpandedPlayer({
   analyser,
+  equalizer,
   onPlay,
   onPause,
   onNext,
   onPrevious,
   onSeek,
   onVolumeChange,
+  onEqBandChange,
+  onEqPreampChange,
+  onEqOutputChange,
+  onEqBypassChange,
+  onEqReset,
 }: ExpandedPlayerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -91,11 +98,12 @@ export function ExpandedPlayer({
   useEffect(() => {
     if (!panelRef.current) return;
     const animation = animate(panelRef.current.querySelectorAll('.js-expand-surface'), {
-      opacity: [0.6, 1],
-      translateY: [10, 0],
-      delay: (_el, index) => index * 70,
-      duration: 500,
-      ease: 'out(3)',
+      opacity: [0.5, 1],
+      translateY: [16, 0],
+      scale: [0.992, 1],
+      delay: (_el, index) => index * 85,
+      duration: 620,
+      ease: 'out(4)',
     });
     return () => {
       animation.pause();
@@ -109,12 +117,8 @@ export function ExpandedPlayer({
           <AlbumArt url={null} album={null} size="md" />
           <div className="space-y-2">
             <p className="soft-label">Expanded Mode</p>
-            <p className="text-lg text-cosmic-light-teal">World Fair Listening Deck</p>
             <p className="text-sm">No track selected yet.</p>
-            <div className="flex gap-6 pt-2">
-              <SynthKnob label="Drive" value={0.42} isPlaying={false} />
-              <SynthKnob label="Air" value={0.68} isPlaying={false} />
-            </div>
+            <p className="text-xs text-cosmic-light-teal/55">Select a track to view live waveform, VU, and EQ.</p>
           </div>
         </div>
 
@@ -125,6 +129,9 @@ export function ExpandedPlayer({
 
         <div className="text-center">
           <p className="text-lg">Select a track from Library to start playback</p>
+          <p className="text-sm text-cosmic-light-teal/55">
+            Equalizer and fader rack appear when playback is active.
+          </p>
         </div>
       </div>
     );
@@ -157,12 +164,6 @@ export function ExpandedPlayer({
               {currentTrack.genre}
             </span>
           )}
-
-          <div className="mt-4 flex gap-6">
-            <SynthKnob label="Drive" value={0.57} isPlaying={isPlaying} />
-            <SynthKnob label="Presence" value={0.48} isPlaying={isPlaying} />
-            <SynthKnob label="Space" value={0.64} isPlaying={isPlaying} />
-          </div>
         </div>
       </div>
 
@@ -170,6 +171,60 @@ export function ExpandedPlayer({
       <div className="js-expand-surface space-y-4 rounded-lg border border-cosmic-light-teal/20 bg-cosmic-teal/10 p-4">
         <Waveform analyser={analyser} isPlaying={isPlaying} />
         <VUMeters analyser={analyser} isPlaying={isPlaying} />
+      </div>
+
+      <div className="js-expand-surface sk-panel sk-eq-panel p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-mono text-sm uppercase tracking-[0.2em] text-cosmic-light-teal">Equalizer Rack</h3>
+            <p className="text-xs text-cosmic-light-teal/65">10-band DSP with preamp and output faders</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onEqReset} className="terminal-btn px-3 py-2 text-xs">
+              Reset Flat
+            </button>
+            <button
+              onClick={() => onEqBypassChange(!equalizer.bypass)}
+              className={`terminal-btn px-3 py-2 text-xs ${equalizer.bypass ? 'terminal-btn-primary' : ''}`}
+            >
+              {equalizer.bypass ? 'Bypassed' : 'Bypass Off'}
+            </button>
+          </div>
+        </div>
+
+        <div className="eq-rack">
+          <Fader
+            label="PRE"
+            value={equalizer.preampDb}
+            min={-12}
+            max={12}
+            step={0.1}
+            display={formatDb(equalizer.preampDb)}
+            onChange={onEqPreampChange}
+          />
+          {equalizer.bands.map((bandGain, index) => (
+            <Fader
+              key={EQ_BAND_LABELS[index] ?? String(index)}
+              label={EQ_BAND_LABELS[index] ?? String(index)}
+              value={bandGain}
+              min={-12}
+              max={12}
+              step={0.1}
+              display={formatDb(bandGain)}
+              onChange={(nextValue) => onEqBandChange(index, nextValue)}
+            />
+          ))}
+          <Fader
+            label="OUT"
+            value={equalizer.output}
+            min={0}
+            max={1}
+            step={0.01}
+            display={`${Math.round(equalizer.output * 100)}%`}
+            onChange={onEqOutputChange}
+            centerMarker={false}
+          />
+        </div>
       </div>
 
       {/* Seek bar */}

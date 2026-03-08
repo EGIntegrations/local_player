@@ -1,4 +1,15 @@
 import { Howl, Howler } from 'howler';
+import type { EqualizerState } from '../types/settings';
+
+const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function dbToGain(db: number): number {
+  return Math.pow(10, db / 20);
+}
 
 export class AudioService {
   private currentHowl: Howl | null = null;
@@ -13,10 +24,19 @@ export class AudioService {
   // Web Audio API for visualizations
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private preampNode: GainNode | null = null;
+  private outputNode: GainNode | null = null;
+  private eqNodes: BiquadFilterNode[] = [];
+  private graphInitialized = false;
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private sourceNodeByElement = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
-  private analyserConnectedToDestination = false;
   private loadSequence = 0;
+  private eqState: EqualizerState = {
+    bands: [...EQ_FREQUENCIES.map(() => 0)],
+    preampDb: 0,
+    output: 1,
+    bypass: false,
+  };
 
   constructor() {
     Howler.volume(this._volume);
@@ -28,6 +48,62 @@ export class AudioService {
 
   private emitDebug(message: string) {
     this.onDebugCallback?.(message);
+  }
+
+  private ensureAudioGraph() {
+    if (!this.audioContext) {
+      const ContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!ContextCtor) {
+        this.emitDebug('analyser: AudioContext API unavailable');
+        return false;
+      }
+      this.audioContext = new ContextCtor();
+    }
+
+    if (!this.analyser) {
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.8;
+    }
+    if (!this.preampNode) {
+      this.preampNode = this.audioContext.createGain();
+    }
+    if (!this.outputNode) {
+      this.outputNode = this.audioContext.createGain();
+    }
+    if (this.eqNodes.length === 0) {
+      this.eqNodes = EQ_FREQUENCIES.map((frequency) => {
+        const node = this.audioContext!.createBiquadFilter();
+        node.type = 'peaking';
+        node.frequency.value = frequency;
+        node.Q.value = 1.0;
+        node.gain.value = 0;
+        return node;
+      });
+    }
+    if (!this.graphInitialized) {
+      let cursor: AudioNode = this.preampNode;
+      for (const eqNode of this.eqNodes) {
+        cursor.connect(eqNode);
+        cursor = eqNode;
+      }
+      cursor.connect(this.outputNode);
+      this.outputNode.connect(this.analyser);
+      this.analyser.connect(this.audioContext.destination);
+      this.graphInitialized = true;
+    }
+
+    this.applyEqStateToNodes();
+    return true;
+  }
+
+  private applyEqStateToNodes() {
+    if (!this.preampNode || !this.outputNode) return;
+    this.preampNode.gain.value = this.eqState.bypass ? 1 : dbToGain(this.eqState.preampDb);
+    this.outputNode.gain.value = clamp(this.eqState.output, 0, 1);
+    for (let i = 0; i < this.eqNodes.length; i += 1) {
+      this.eqNodes[i].gain.value = this.eqState.bypass ? 0 : this.eqState.bands[i] ?? 0;
+    }
   }
 
   private connectAnalyser(howl: Howl | null = this.currentHowl) {
@@ -48,40 +124,23 @@ export class AudioService {
     }
 
     try {
-      if (!this.audioContext) {
-        const ContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-        if (!ContextCtor) {
-          this.emitDebug('analyser: AudioContext API unavailable');
-          return;
-        }
-        this.audioContext = new ContextCtor();
-      }
-
-      if (!this.analyser) {
-        this.analyser = this.audioContext.createAnalyser();
-        this.analyser.fftSize = 256;
-        this.analyser.smoothingTimeConstant = 0.8;
-      }
-      if (!this.analyserConnectedToDestination) {
-        this.analyser.connect(this.audioContext.destination);
-        this.analyserConnectedToDestination = true;
-      }
+      if (!this.ensureAudioGraph() || !this.preampNode) return;
 
       let nextSourceNode = this.sourceNodeByElement.get(audioElement);
       if (!nextSourceNode) {
-        nextSourceNode = this.audioContext.createMediaElementSource(audioElement);
+        nextSourceNode = this.audioContext!.createMediaElementSource(audioElement);
         this.sourceNodeByElement.set(audioElement, nextSourceNode);
       }
 
       if (this.sourceNode !== nextSourceNode) {
         if (this.sourceNode) {
           try {
-            this.sourceNode.disconnect(this.analyser);
+            this.sourceNode.disconnect(this.preampNode);
           } catch {
             this.sourceNode.disconnect();
           }
         }
-        nextSourceNode.connect(this.analyser);
+        nextSourceNode.connect(this.preampNode);
         this.sourceNode = nextSourceNode;
       }
 
@@ -153,6 +212,46 @@ export class AudioService {
 
   play() {
     this.currentHowl?.play();
+  }
+
+  getEqState(): EqualizerState {
+    return {
+      bands: [...this.eqState.bands],
+      preampDb: this.eqState.preampDb,
+      output: this.eqState.output,
+      bypass: this.eqState.bypass,
+    };
+  }
+
+  setEqBandGain(index: number, gainDb: number) {
+    if (index < 0 || index >= this.eqState.bands.length) return;
+    this.eqState.bands[index] = clamp(gainDb, -12, 12);
+    this.applyEqStateToNodes();
+  }
+
+  setEqPreamp(gainDb: number) {
+    this.eqState.preampDb = clamp(gainDb, -12, 12);
+    this.applyEqStateToNodes();
+  }
+
+  setEqOutput(value: number) {
+    this.eqState.output = clamp(value, 0, 1);
+    this.applyEqStateToNodes();
+  }
+
+  setEqBypass(enabled: boolean) {
+    this.eqState.bypass = Boolean(enabled);
+    this.applyEqStateToNodes();
+  }
+
+  resetEq() {
+    this.eqState = {
+      bands: [...EQ_FREQUENCIES.map(() => 0)],
+      preampDb: 0,
+      output: 1,
+      bypass: false,
+    };
+    this.applyEqStateToNodes();
   }
 
   async playWithConfirm(timeoutMs = 2500): Promise<void> {
@@ -289,7 +388,13 @@ export class AudioService {
     this.sourceNode?.disconnect();
     this.sourceNode = null;
     this.sourceNodeByElement = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
-    this.analyserConnectedToDestination = false;
+    this.graphInitialized = false;
+    this.preampNode?.disconnect();
+    this.outputNode?.disconnect();
+    this.eqNodes.forEach((node) => node.disconnect());
+    this.preampNode = null;
+    this.outputNode = null;
+    this.eqNodes = [];
     this.currentHowl?.unload();
     this.clearProgressInterval();
     this.audioContext?.close();

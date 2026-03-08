@@ -24,6 +24,12 @@ type FileProcessingResult = {
   status: 'added' | 'existing' | 'failed';
   error?: string;
 };
+const THEME_MODE_KEY = 'theme_mode';
+const EQ_STATE_KEY = 'equalizer_state';
+
+function isThemeMode(value: string | null): value is 'light' | 'dark' | 'system' {
+  return value === 'light' || value === 'dark' || value === 'system';
+}
 
 function normalizeFileSystemPath(inputPath: string): string {
   if (!inputPath.startsWith('file://')) return inputPath;
@@ -97,6 +103,18 @@ export function PlayerShell() {
   } = usePlayerStore();
   const { setTracks, addTrack: addTrackToLibrary } = useLibraryStore();
   const setMonitoredFolder = useSettingsStore((s) => s.setMonitoredFolder);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const setResolvedTheme = useSettingsStore((s) => s.setResolvedTheme);
+  const syncResolvedTheme = useSettingsStore((s) => s.syncResolvedTheme);
+  const equalizer = useSettingsStore((s) => s.equalizer);
+  const setEqState = useSettingsStore((s) => s.setEqState);
+  const setEqBandGain = useSettingsStore((s) => s.setEqBandGain);
+  const setEqPreamp = useSettingsStore((s) => s.setEqPreamp);
+  const setEqOutput = useSettingsStore((s) => s.setEqOutput);
+  const setEqBypass = useSettingsStore((s) => s.setEqBypass);
+  const resetEq = useSettingsStore((s) => s.resetEq);
   const { activeView, setActiveView, setSettingsVisible, togglePlayerMode, playerMode } = useUIStore();
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -125,6 +143,13 @@ export function PlayerShell() {
   useEffect(() => {
     const audio = new AudioService();
     audioRef.current = audio;
+    const initialEq = useSettingsStore.getState().equalizer;
+    for (let i = 0; i < initialEq.bands.length; i += 1) {
+      audio.setEqBandGain(i, initialEq.bands[i]);
+    }
+    audio.setEqPreamp(initialEq.preampDb);
+    audio.setEqOutput(initialEq.output);
+    audio.setEqBypass(initialEq.bypass);
 
     audio.onProgress((p) => setProgress(p));
     audio.onEnd(() => {
@@ -147,6 +172,16 @@ export function PlayerShell() {
 
     return () => audio.cleanup();
   }, [advancePlayback, setDuration, setPlaying, setProgress]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    for (let i = 0; i < equalizer.bands.length; i += 1) {
+      audioRef.current.setEqBandGain(i, equalizer.bands[i]);
+    }
+    audioRef.current.setEqPreamp(equalizer.preampDb);
+    audioRef.current.setEqOutput(equalizer.output);
+    audioRef.current.setEqBypass(equalizer.bypass);
+  }, [equalizer]);
 
   useEffect(() => {
     return () => {
@@ -259,6 +294,67 @@ export function PlayerShell() {
       }
     }).catch(console.error);
   }, [setMonitoredFolder]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadUiSettings = async () => {
+      const [storedThemeMode, storedEq] = await Promise.all([
+        db.getSetting(THEME_MODE_KEY),
+        db.getSetting(EQ_STATE_KEY),
+      ]);
+
+      if (!cancelled && isThemeMode(storedThemeMode)) {
+        setThemeMode(storedThemeMode);
+      }
+
+      if (!cancelled && storedEq) {
+        try {
+          const parsed = JSON.parse(storedEq);
+          if (parsed && typeof parsed === 'object') {
+            setEqState(parsed);
+          }
+        } catch (err) {
+          console.warn('Failed to parse saved equalizer state:', err);
+        }
+      }
+    };
+
+    loadUiSettings().catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [setEqState, setThemeMode]);
+
+  useEffect(() => {
+    db.setSetting(THEME_MODE_KEY, themeMode).catch(console.error);
+  }, [themeMode]);
+
+  useEffect(() => {
+    db.setSetting(EQ_STATE_KEY, JSON.stringify(equalizer)).catch(console.error);
+  }, [equalizer]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      setResolvedTheme(themeMode === 'dark' ? 'dark' : 'light');
+      return;
+    }
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    if (themeMode === 'system') {
+      syncResolvedTheme(media.matches);
+      const onChange = (event: MediaQueryListEvent) => syncResolvedTheme(event.matches);
+      if (typeof media.addEventListener === 'function') {
+        media.addEventListener('change', onChange);
+        return () => media.removeEventListener('change', onChange);
+      }
+      media.addListener(onChange);
+      return () => media.removeListener(onChange);
+    }
+    setResolvedTheme(themeMode);
+  }, [setResolvedTheme, syncResolvedTheme, themeMode]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', resolvedTheme);
+  }, [resolvedTheme]);
 
   // Listen for file watcher events
   useEffect(() => {
@@ -441,6 +537,21 @@ export function PlayerShell() {
     audioRef.current?.setVolume(vol);
     setVolume(vol);
   };
+  const handleEqBandChange = useCallback((index: number, gainDb: number) => {
+    setEqBandGain(index, gainDb);
+  }, [setEqBandGain]);
+  const handleEqPreampChange = useCallback((gainDb: number) => {
+    setEqPreamp(gainDb);
+  }, [setEqPreamp]);
+  const handleEqOutputChange = useCallback((output: number) => {
+    setEqOutput(output);
+  }, [setEqOutput]);
+  const handleEqBypassToggle = useCallback((enabled: boolean) => {
+    setEqBypass(enabled);
+  }, [setEqBypass]);
+  const handleEqReset = useCallback(() => {
+    resetEq();
+  }, [resetEq]);
 
   useEffect(() => {
     if (!shellRef.current) return;
@@ -448,10 +559,11 @@ export function PlayerShell() {
     if (surfaces.length === 0) return;
     const animation = animate(surfaces, {
       opacity: [0, 1],
-      translateY: [14, 0],
-      delay: (_el, i) => i * 60,
-      duration: 520,
-      ease: 'out(3)',
+      translateY: [18, 0],
+      scale: [0.992, 1],
+      delay: (_el, i) => i * 75,
+      duration: 620,
+      ease: 'out(4)',
     });
     return () => {
       animation.pause();
@@ -463,10 +575,11 @@ export function PlayerShell() {
     const activePanel = shellRef.current.querySelector('.js-active-panel');
     if (!activePanel) return;
     const animation = animate(activePanel, {
-      opacity: [0.65, 1],
-      scale: [0.99, 1],
-      duration: 320,
-      ease: 'out(3)',
+      opacity: [0.5, 1],
+      scale: [0.988, 1],
+      translateY: [8, 0],
+      duration: 460,
+      ease: 'out(4)',
     });
     return () => {
       animation.pause();
@@ -483,12 +596,24 @@ export function PlayerShell() {
               <span className="signal-dot" />
               <p className="soft-label">Audio Node Active</p>
             </div>
-            <h1 className="mt-2 text-3xl font-bold font-mono tracking-[0.18em] text-cosmic-light-teal">
+            <h1 className="brand-title mt-2 text-4xl text-cosmic-light-teal">
               Local Player
             </h1>
           </div>
 
           <div className="flex gap-2">
+            <div className="theme-chip" aria-label="Theme mode">
+              {(['light', 'dark', 'system'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setThemeMode(mode)}
+                  className={`theme-chip-btn ${themeMode === mode ? 'theme-chip-btn-active' : ''}`}
+                  title={`Use ${mode} theme`}
+                >
+                  {mode === 'system' ? 'Sys' : mode[0].toUpperCase()}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => {
                 setActiveView('player');
@@ -542,12 +667,18 @@ export function PlayerShell() {
               ) : (
                 <ExpandedPlayer
                   analyser={analyserNode}
+                  equalizer={equalizer}
                   onPlay={handlePlay}
                   onPause={handlePause}
                   onNext={handleNext}
                   onPrevious={handlePrevious}
                   onSeek={handleSeek}
                   onVolumeChange={handleVolumeChange}
+                  onEqBandChange={handleEqBandChange}
+                  onEqPreampChange={handleEqPreampChange}
+                  onEqOutputChange={handleEqOutputChange}
+                  onEqBypassChange={handleEqBypassToggle}
+                  onEqReset={handleEqReset}
                 />
               )}
             </div>

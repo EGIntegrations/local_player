@@ -73,6 +73,43 @@ describe('AudioService', () => {
     audio.onLoad(loadCb);
   });
 
+  it('should expose default equalizer state', () => {
+    const eq = audio.getEqState();
+    expect(eq.bands).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(eq.preampDb).toBe(0);
+    expect(eq.output).toBe(1);
+    expect(eq.bypass).toBe(false);
+  });
+
+  it('should clamp equalizer values', () => {
+    audio.setEqBandGain(0, 20);
+    audio.setEqBandGain(1, -17);
+    audio.setEqPreamp(30);
+    audio.setEqOutput(-5);
+    audio.setEqBypass(true);
+
+    const eq = audio.getEqState();
+    expect(eq.bands[0]).toBe(12);
+    expect(eq.bands[1]).toBe(-12);
+    expect(eq.preampDb).toBe(12);
+    expect(eq.output).toBe(0);
+    expect(eq.bypass).toBe(true);
+  });
+
+  it('should reset equalizer state', () => {
+    audio.setEqBandGain(4, 6);
+    audio.setEqPreamp(5);
+    audio.setEqOutput(0.4);
+    audio.setEqBypass(true);
+    audio.resetEq();
+
+    const eq = audio.getEqState();
+    expect(eq.bands).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(eq.preampDb).toBe(0);
+    expect(eq.output).toBe(1);
+    expect(eq.bypass).toBe(false);
+  });
+
   it('should load a track without throwing', () => {
     expect(() => audio.loadTrack('/test.mp3')).not.toThrow();
   });

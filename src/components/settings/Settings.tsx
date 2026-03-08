@@ -1,4 +1,5 @@
 import { useUIStore } from '../../stores/uiStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { FolderSelection } from './FolderSelection';
 
 interface SettingsProps {
@@ -9,6 +10,9 @@ interface SettingsProps {
 export function Settings({ onFolderSelected, onFilesSelected }: SettingsProps) {
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
 
   if (!settingsVisible) return null;
 
@@ -32,6 +36,24 @@ export function Settings({ onFolderSelected, onFilesSelected }: SettingsProps) {
         </div>
 
         <div className="space-y-6">
+          <section>
+            <h3 className="panel-title mb-3 text-lg font-semibold">Theme</h3>
+            <div className="theme-segmented">
+              {(['light', 'dark', 'system'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setThemeMode(mode)}
+                  className={`theme-segmented-btn ${themeMode === mode ? 'theme-segmented-btn-active' : ''}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-cosmic-light-teal/65">
+              Active theme: {resolvedTheme}
+            </p>
+          </section>
+
           <section>
             <h3 className="panel-title mb-4 text-lg font-semibold">Local Library</h3>
             <FolderSelection onFolderSelected={onFolderSelected} onFilesSelected={onFilesSelected} />

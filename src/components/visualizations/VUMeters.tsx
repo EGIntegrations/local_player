@@ -84,7 +84,7 @@ export function VUMeters({ analyser, isPlaying }: VUMetersProps) {
   }, [analyser, isPlaying]);
 
   return (
-    <div className="w-full rounded-lg border border-cosmic-light-teal/30 bg-cosmic-teal/10 p-3">
+    <div className="sk-panel w-full rounded-xl border border-cosmic-light-teal/30 bg-cosmic-teal/10 p-3">
       <div className="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-cosmic-light-teal/70">
         Stereo VU
       </div>
