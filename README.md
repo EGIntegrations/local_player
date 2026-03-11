@@ -11,3 +11,4 @@ This template should help get you started developing with Tauri, React and Types
 - Cross-OS release workflow: `.github/workflows/release.yml`
 - Release operator guide: `docs/release-operations.md`
 - Release manifest schema: `docs/release-manifest.schema.json`
+- License operations guide: `docs/license-operations.md`

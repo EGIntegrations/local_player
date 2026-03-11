@@ -69,6 +69,16 @@ function parseFilenameMetadata(filePath: string): { title: string; artist: strin
   return { title: stem, artist: null };
 }
 
+function getBasename(filePath: string): string {
+  const normalized = normalizeFileSystemPath(filePath).replace(/\\/g, '/');
+  return normalized.split('/').pop() ?? normalized;
+}
+
+function isMissingFileError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('no such file or directory') || lower.includes('os error 2');
+}
+
 function chooseTitle(tagTitle: string | null | undefined, filePath: string): string {
   const normalized = tagTitle?.trim() ?? '';
   if (!normalized || /^unknown$/i.test(normalized)) {
@@ -110,6 +120,7 @@ export function PlayerShell() {
   const {
     currentTrack,
     progress,
+    setCurrentTrack,
     setPlaying,
     setProgress,
     setDuration,
@@ -221,13 +232,78 @@ export function PlayerShell() {
       const requestId = ++playbackRequestRef.current;
       const loadErrors: string[] = [];
       let bytes: Uint8Array | null = null;
+      let playbackPath = normalizedPath;
       setProgress(0);
       setDuration(0);
+
+      const resolveMovedTrackPath = async (): Promise<string | null> => {
+        const monitoredFolder = await db.getSetting('monitored_folder');
+        if (!monitoredFolder) return null;
+
+        const monitoredFiles = await scanFolder(monitoredFolder);
+        if (monitoredFiles.length === 0) return null;
+
+        const targetName = getBasename(playbackPath).toLowerCase();
+        const exactNameMatches = monitoredFiles
+          .map(normalizeFileSystemPath)
+          .filter((file) => getBasename(file).toLowerCase() === targetName);
+
+        if (exactNameMatches.length === 1) {
+          return exactNameMatches[0];
+        }
+
+        if (exactNameMatches.length > 1) {
+          const artist = currentTrack.artist?.trim().toLowerCase() ?? '';
+          const title = currentTrack.title.trim().toLowerCase();
+          const metadataMatch = exactNameMatches.find((file) => {
+            const parsed = parseFilenameMetadata(file);
+            const parsedArtist = parsed.artist?.trim().toLowerCase() ?? '';
+            const parsedTitle = parsed.title.trim().toLowerCase();
+            return parsedTitle === title && (!artist || parsedArtist === artist);
+          });
+          return metadataMatch ?? exactNameMatches[0];
+        }
+
+        const title = currentTrack.title.trim().toLowerCase();
+        if (!title || title === 'unknown track') return null;
+
+        const artist = currentTrack.artist?.trim().toLowerCase() ?? '';
+        const fuzzyMatch = monitoredFiles
+          .map(normalizeFileSystemPath)
+          .find((file) => {
+            const parsed = parseFilenameMetadata(file);
+            const parsedTitle = parsed.title.trim().toLowerCase();
+            const parsedArtist = parsed.artist?.trim().toLowerCase() ?? '';
+            return parsedTitle === title && (!artist || parsedArtist === artist);
+          });
+
+        return fuzzyMatch ?? null;
+      };
+
       try {
-        bytes = await readFile(normalizedPath);
+        bytes = await readFile(playbackPath);
       } catch (error) {
         const readError = error instanceof Error ? error.message : String(error);
-        loadErrors.push(`fs-read failed (${readError})`);
+        if (isMissingFileError(readError)) {
+          try {
+            const relocatedPath = await resolveMovedTrackPath();
+            if (relocatedPath) {
+              playbackPath = relocatedPath;
+              await db.updateTrackFilePath(currentTrack.id, relocatedPath);
+              setCurrentTrack({ ...currentTrack, filePath: relocatedPath });
+              const refreshedTracks = await db.getAllTracks();
+              setTracks(refreshedTracks);
+              bytes = await readFile(playbackPath);
+            } else {
+              loadErrors.push(`fs-read failed (${readError})`);
+            }
+          } catch (relocateError) {
+            const relocateMessage = relocateError instanceof Error ? relocateError.message : String(relocateError);
+            loadErrors.push(`fs-read failed (${readError}); relocate failed (${relocateMessage})`);
+          }
+        } else {
+          loadErrors.push(`fs-read failed (${readError})`);
+        }
       }
 
       const sources: { kind: 'blob' | 'asset' | 'data'; url: string }[] = [];
@@ -240,7 +316,7 @@ export function PlayerShell() {
         playbackBlobUrlRef.current = URL.createObjectURL(audioBlob);
         sources.push({ kind: 'blob', url: playbackBlobUrlRef.current });
       }
-      sources.push({ kind: 'asset', url: convertFileSrc(normalizedPath) });
+      sources.push({ kind: 'asset', url: convertFileSrc(playbackPath) });
       if (bytes && bytes.length > 0) {
         sources.push({ kind: 'data', url: `data:audio/mpeg;base64,${bytesToBase64(bytes)}` });
       }
@@ -276,7 +352,7 @@ export function PlayerShell() {
     return () => {
       cancelled = true;
     };
-  }, [currentTrack, setDuration, setPlaying, setProgress, startPlayback]);
+  }, [currentTrack, setCurrentTrack, setDuration, setPlaying, setProgress, setTracks, startPlayback]);
 
   // Load library on startup
   useEffect(() => {

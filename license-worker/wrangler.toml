@@ -1,0 +1,7 @@
+name = "local-player-license"
+main = "src/index.ts"
+compatibility_date = "2026-03-11"
+
+[vars]
+LEMON_SQUEEZY_API_BASE = "https://api.lemonsqueezy.com"
+

@@ -71,6 +71,15 @@ export async function updateTrackMetadata(
   );
 }
 
+export async function updateTrackFilePath(trackId: number, filePath: string): Promise<void> {
+  const conn = await getDb();
+  const now = Math.floor(Date.now() / 1000);
+  await conn.execute(
+    'UPDATE tracks SET file_path = ?, updated_at = ? WHERE id = ?',
+    [filePath, now, trackId]
+  );
+}
+
 export async function getTrackByFilePath(filePath: string): Promise<Track | null> {
   const conn = await getDb();
   const rows = await conn.select<Track[]>(
