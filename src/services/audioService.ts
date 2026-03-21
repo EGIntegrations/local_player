@@ -185,11 +185,29 @@ export class AudioService {
     }
 
     this.emitDebug(`track: loading ${url.slice(0, 80)}`);
+    const html5Order = /^(blob:|data:)/i.test(url) ? [false, true] : [true, false];
+    const failures: string[] = [];
 
+    for (const html5 of html5Order) {
+      try {
+        await this.loadHowl(url, html5, loadId);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(`html5=${html5} ${message}`);
+        this.currentHowl?.unload();
+        this.currentHowl = null;
+      }
+    }
+
+    throw new Error(failures.join(' | '));
+  }
+
+  private async loadHowl(url: string, html5: boolean, loadId: number): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const howl = new Howl({
         src: [url],
-        html5: true,
+        html5,
         volume: this._volume,
         onload: () => {
           if (this.loadSequence !== loadId || this.currentHowl !== howl) return;
@@ -197,7 +215,7 @@ export class AudioService {
           if (this.onLoadCallback) {
             this.onLoadCallback(howl.duration());
           }
-          this.emitDebug('track: loaded');
+          this.emitDebug(`track: loaded (html5=${html5})`);
           resolve();
         },
         onplay: () => {
@@ -224,7 +242,7 @@ export class AudioService {
         onloaderror: (_id, error) => {
           if (this.loadSequence !== loadId || this.currentHowl !== howl) return;
           const message = `load failed (${this.describeMediaError(error)})`;
-          this.emitDebug(`track: ${message}`);
+          this.emitDebug(`track: ${message} (html5=${html5})`);
           reject(new Error(message));
         },
         onplayerror: (_id, error) => {
