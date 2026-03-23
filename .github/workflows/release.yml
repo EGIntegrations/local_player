@@ -47,6 +47,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Cache Tauri bundler tools
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/target/.tauri
+          key: ${{ runner.os }}-tauri-tools-${{ hashFiles('src-tauri/tauri.conf.json') }}
+          restore-keys: |
+            ${{ runner.os }}-tauri-tools-
+
       - name: Validate macOS signing/notarization secrets
         if: matrix.platform == 'macos'
         shell: bash
@@ -71,7 +79,20 @@ jobs:
           if [[ "${{ matrix.platform }}" == "macos" ]]; then
             npm run tauri build -- --bundles dmg
           else
-            npm run tauri build -- --bundles nsis
+            max_attempts=3
+            attempt=1
+            while true; do
+              echo "Windows bundle attempt ${attempt}/${max_attempts}"
+              if npm run tauri build -- --bundles nsis; then
+                break
+              fi
+              if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+                echo "Windows bundle failed after ${max_attempts} attempts"
+                exit 1
+              fi
+              attempt=$((attempt + 1))
+              sleep 15
+            done
           fi
 
       - name: Prepare release assets
