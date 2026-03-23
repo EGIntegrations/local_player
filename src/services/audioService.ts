@@ -185,7 +185,8 @@ export class AudioService {
     }
 
     this.emitDebug(`track: loading ${url.slice(0, 80)}`);
-    const html5Order = /^(blob:|data:)/i.test(url) ? [false, true] : [true, false];
+    // Prefer HTMLMediaElement mode so the DSP/visualizer graph can attach consistently.
+    const html5Order = [true, false];
     const failures: string[] = [];
 
     for (const html5 of html5Order) {

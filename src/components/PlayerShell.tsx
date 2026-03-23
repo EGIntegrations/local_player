@@ -16,12 +16,12 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useUIStore } from '../stores/uiStore';
 import { AudioService } from '../services/audioService';
 import { parseID3Tags } from '../services/id3Parser';
-import { scanFolder, startWatchingFolder, readFileHeader } from '../services/tauriCommands';
+import { scanFolder, startWatchingFolder, readFileHeader, readFileBytes } from '../services/tauriCommands';
 import * as db from '../services/database';
 
 type ToastInfo = { message: string; type: 'success' | 'error' | 'info' };
 type FileProcessingResult = {
-  status: 'added' | 'existing' | 'failed';
+  status: 'added' | 'existing' | 'skipped' | 'failed';
   error?: string;
 };
 const THEME_MODE_KEY = 'theme_mode';
@@ -72,6 +72,13 @@ function parseFilenameMetadata(filePath: string): { title: string; artist: strin
 function getBasename(filePath: string): string {
   const normalized = normalizeFileSystemPath(filePath).replace(/\\/g, '/');
   return normalized.split('/').pop() ?? normalized;
+}
+
+function isImportableMp3Path(filePath: string): boolean {
+  const baseName = getBasename(filePath).trim();
+  if (!baseName) return false;
+  if (baseName.startsWith('._') || baseName.startsWith('.')) return false;
+  return /\.mp3$/i.test(baseName);
 }
 
 function isMissingFileError(message: string): boolean {
@@ -236,6 +243,25 @@ export function PlayerShell() {
       setProgress(0);
       setDuration(0);
 
+      const readAudioBytes = async (filePath: string): Promise<Uint8Array> => {
+        try {
+          return await readFile(filePath);
+        } catch (fsError) {
+          const fsMessage = fsError instanceof Error ? fsError.message : String(fsError);
+          if (isMissingFileError(fsMessage)) {
+            throw new Error(fsMessage);
+          }
+
+          try {
+            const fallbackBytes = await readFileBytes(filePath);
+            return new Uint8Array(fallbackBytes);
+          } catch (fallbackError) {
+            const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            throw new Error(`${fsMessage}; command read failed (${fallbackMessage})`);
+          }
+        }
+      };
+
       const resolveMovedTrackPath = async (): Promise<string | null> => {
         const monitoredFolder = await db.getSetting('monitored_folder');
         if (!monitoredFolder) return null;
@@ -281,7 +307,7 @@ export function PlayerShell() {
       };
 
       try {
-        bytes = await readFile(playbackPath);
+        bytes = await readAudioBytes(playbackPath);
       } catch (error) {
         const readError = error instanceof Error ? error.message : String(error);
         if (isMissingFileError(readError)) {
@@ -293,7 +319,7 @@ export function PlayerShell() {
               setCurrentTrack({ ...currentTrack, filePath: relocatedPath });
               const refreshedTracks = await db.getAllTracks();
               setTracks(refreshedTracks);
-              bytes = await readFile(playbackPath);
+              bytes = await readAudioBytes(playbackPath);
             } else {
               loadErrors.push(`fs-read failed (${readError})`);
             }
@@ -358,8 +384,18 @@ export function PlayerShell() {
   useEffect(() => {
     const loadLibrary = async () => {
       const existingTracks = await db.getAllTracks();
+      const cleanedTrackIds = new Set<number>();
+
+      // Remove stale/unsupported metadata files from previous scans.
+      for (const track of existingTracks) {
+        if (isImportableMp3Path(track.filePath)) continue;
+        await db.deleteTrack(track.id);
+        cleanedTrackIds.add(track.id);
+      }
+
       // Backfill legacy imports that were stored as "Unknown" before filename fallback.
       for (const track of existingTracks) {
+        if (cleanedTrackIds.has(track.id)) continue;
         const unknownTitle = !track.title || /^unknown$/i.test(track.title.trim());
         const unknownArtist = !track.artist || /^unknown artist$/i.test(track.artist.trim());
         if (!unknownTitle && !unknownArtist) continue;
@@ -487,6 +523,9 @@ export function PlayerShell() {
   const processNewFile = useCallback(async (filePath: string): Promise<FileProcessingResult> => {
     try {
       const normalizedPath = normalizeFileSystemPath(filePath);
+      if (!isImportableMp3Path(normalizedPath)) {
+        return { status: 'skipped' };
+      }
 
       // Check if already in library
       const existing = await db.getTrackByFilePath(normalizedPath);
@@ -546,6 +585,7 @@ export function PlayerShell() {
   const importFilesIntoLibrary = useCallback(async (files: string[]) => {
     let added = 0;
     let existing = 0;
+    let skipped = 0;
     let failed = 0;
     let firstError: string | null = null;
 
@@ -553,6 +593,7 @@ export function PlayerShell() {
       const result = await processNewFile(filePath);
       if (result.status === 'added') added += 1;
       if (result.status === 'existing') existing += 1;
+      if (result.status === 'skipped') skipped += 1;
       if (result.status === 'failed') {
         failed += 1;
         if (!firstError && result.error) firstError = result.error;
@@ -562,7 +603,7 @@ export function PlayerShell() {
     const tracks = await db.getAllTracks();
     setTracks(tracks);
 
-    return { added, existing, failed, total: files.length, libraryCount: tracks.length, firstError };
+    return { added, existing, skipped, failed, total: files.length, libraryCount: tracks.length, firstError };
   }, [processNewFile, setTracks]);
 
   const handleFolderSelected = async (folderPath: string) => {
@@ -574,15 +615,15 @@ export function PlayerShell() {
     setActiveView('library');
 
     try {
-      const files = await scanFolder(normalizedFolder);
+      const files = (await scanFolder(normalizedFolder)).filter(isImportableMp3Path);
       setToast({ message: `Found ${files.length} MP3 files. Scanning...`, type: 'info' });
 
       const summary = await importFilesIntoLibrary(files);
 
       await startWatchingFolder(normalizedFolder);
       const summaryText = summary.failed > 0
-        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
-        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing)`;
+        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.skipped} skipped, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
+        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.skipped} skipped)`;
       setToast({ message: summaryText, type: 'success' });
     } catch (err) {
       setToast({ message: `Error scanning folder: ${err}`, type: 'error' });
@@ -599,7 +640,7 @@ export function PlayerShell() {
     try {
       const mp3Files = paths
         .map(normalizeFileSystemPath)
-        .filter((path) => /\.mp3$/i.test(path));
+        .filter(isImportableMp3Path);
       if (mp3Files.length === 0) {
         setToast({ message: 'No .mp3 files selected', type: 'error' });
         return;
@@ -608,8 +649,8 @@ export function PlayerShell() {
       setToast({ message: `Adding ${mp3Files.length} selected files...`, type: 'info' });
       const summary = await importFilesIntoLibrary(mp3Files);
       const summaryText = summary.failed > 0
-        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
-        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing)`;
+        ? `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.skipped} skipped, ${summary.failed} failed${summary.firstError ? `: ${summary.firstError}` : ''})`
+        : `Library loaded: ${summary.libraryCount} tracks (${summary.added} added, ${summary.existing} existing, ${summary.skipped} skipped)`;
       setToast({ message: summaryText, type: 'success' });
     } catch (err) {
       setToast({ message: `Error adding files: ${err}`, type: 'error' });

@@ -22,6 +22,13 @@ fn collect_mp3s(dir: &Path, mp3_files: &mut Vec<String>) -> std::io::Result<()> 
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Ignore hidden/system entries and AppleDouble metadata files.
+        if file_name.starts_with('.') || file_name.starts_with("._") {
+            continue;
+        }
+
         if path.is_dir() {
             collect_mp3s(&path, mp3_files)?;
         } else if let Some(ext) = path.extension() {

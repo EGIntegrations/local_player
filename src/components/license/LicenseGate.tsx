@@ -75,7 +75,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
         if (!apiConfigured) {
           if (import.meta.env.DEV) {
             setLicensed(true);
-            setMessage('License API not configured in dev mode; license checks bypassed.');
+            setMessage(null);
           } else {
             setLicensed(false);
             setError('License API is not configured. Set VITE_LICENSE_API_BASE.');
@@ -100,7 +100,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
               setInstanceId(result.instanceId);
             }
             setLicensed(true);
-            setMessage('License validated.');
+            setMessage(null);
             setLoading(false);
             return;
           }
@@ -183,7 +183,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
       }
       await db.setSetting(KEY_LAST_VALIDATED_AT, String(now));
       setLicensed(true);
-      setMessage('License activated successfully.');
+      setMessage(null);
     } catch (err) {
       setLicensed(false);
       setError(err instanceof Error ? err.message : String(err));
@@ -232,16 +232,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
   }
 
   if (licensed) {
-    return (
-      <>
-        {message && (
-          <div className="fixed left-4 top-4 z-50">
-            <div className="toast-shell toast-info px-4 py-2 text-xs">{message}</div>
-          </div>
-        )}
-        {children}
-      </>
-    );
+    return <>{children}</>;
   }
 
   return (
@@ -294,4 +285,3 @@ export function LicenseGate({ children }: LicenseGateProps) {
     </div>
   );
 }
-
