@@ -74,6 +74,20 @@ function getBasename(filePath: string): string {
   return normalized.split('/').pop() ?? normalized;
 }
 
+function normalizeLookupValue(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^[\s._-]+/, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function trackLookupKeyFromPath(filePath: string): string {
+  const baseName = getBasename(filePath).replace(/\.mp3$/i, '');
+  return normalizeLookupValue(baseName);
+}
+
 function isImportableMp3Path(filePath: string): boolean {
   const baseName = getBasename(filePath).trim();
   if (!baseName) return false;
@@ -153,6 +167,147 @@ export function PlayerShell() {
   const { activeView, setActiveView, setSettingsVisible, togglePlayerMode, playerMode } = useUIStore();
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isCleaningLibrary, setIsCleaningLibrary] = useState(false);
+
+  const cleanupLibraryRecords = useCallback(async (): Promise<{
+    libraryCount: number;
+    removedInvalid: number;
+    deduped: number;
+    relocated: number;
+    repairedMetadata: number;
+  }> => {
+    let removedInvalid = 0;
+    let deduped = 0;
+    let relocated = 0;
+    let repairedMetadata = 0;
+    const cleanedTrackIds = new Set<number>();
+
+    const existingTracks = await db.getAllTracks();
+    for (const track of existingTracks) {
+      if (isImportableMp3Path(track.filePath)) continue;
+      await db.deleteTrack(track.id);
+      cleanedTrackIds.add(track.id);
+      removedInvalid += 1;
+    }
+
+    const monitoredFolder = await db.getSetting('monitored_folder');
+    let monitoredFiles: string[] = [];
+    if (monitoredFolder) {
+      try {
+        monitoredFiles = (await scanFolder(monitoredFolder))
+          .map(normalizeFileSystemPath)
+          .filter(isImportableMp3Path);
+      } catch (error) {
+        console.warn('Unable to scan monitored folder during cleanup:', error);
+      }
+    }
+
+    if (monitoredFiles.length > 0) {
+      const monitoredSet = new Set(monitoredFiles);
+      const monitoredByLookup = new Map<string, string[]>();
+      for (const file of monitoredFiles) {
+        const key = trackLookupKeyFromPath(file);
+        if (!key) continue;
+        const list = monitoredByLookup.get(key) ?? [];
+        list.push(file);
+        monitoredByLookup.set(key, list);
+      }
+
+      const tracksToRepair = (await db.getAllTracks()).filter((track) => !cleanedTrackIds.has(track.id));
+      const usedTargetPaths = new Set(
+        tracksToRepair
+          .map((track) => normalizeFileSystemPath(track.filePath))
+          .filter((path) => monitoredSet.has(path))
+      );
+
+      for (const track of tracksToRepair) {
+        const currentPath = normalizeFileSystemPath(track.filePath);
+        if (monitoredSet.has(currentPath)) continue;
+
+        const key = trackLookupKeyFromPath(currentPath);
+        const candidates = (monitoredByLookup.get(key) ?? []).filter((candidate) => !usedTargetPaths.has(candidate));
+        if (candidates.length === 0) continue;
+
+        const fallback = parseFilenameMetadata(currentPath);
+        const targetArtist = (track.artist ?? fallback.artist ?? '').trim().toLowerCase();
+        const targetTitle = (track.title || fallback.title || '').trim().toLowerCase();
+
+        const bestMatch = candidates.find((candidate) => {
+          const parsed = parseFilenameMetadata(candidate);
+          const parsedArtist = (parsed.artist ?? '').trim().toLowerCase();
+          const parsedTitle = (parsed.title ?? '').trim().toLowerCase();
+          const artistMatches = !targetArtist || !parsedArtist || parsedArtist === targetArtist;
+          const titleMatches = !targetTitle || parsedTitle === targetTitle;
+          return artistMatches && titleMatches;
+        }) ?? candidates[0];
+
+        const existingAtTarget = tracksToRepair.find((other) => {
+          if (other.id === track.id || cleanedTrackIds.has(other.id)) return false;
+          return normalizeFileSystemPath(other.filePath) === bestMatch;
+        });
+
+        if (existingAtTarget) {
+          await db.deleteTrack(track.id);
+          cleanedTrackIds.add(track.id);
+          deduped += 1;
+        } else {
+          await db.updateTrackFilePath(track.id, bestMatch);
+          usedTargetPaths.add(bestMatch);
+          relocated += 1;
+        }
+      }
+    }
+
+    const postRepairTracks = await db.getAllTracks();
+    const buckets = new Map<string, typeof postRepairTracks>();
+    for (const track of postRepairTracks) {
+      if (cleanedTrackIds.has(track.id)) continue;
+      const normalizedPath = normalizeFileSystemPath(track.filePath);
+      const bucket = buckets.get(normalizedPath) ?? [];
+      bucket.push(track);
+      buckets.set(normalizedPath, bucket);
+    }
+
+    for (const [, bucket] of buckets) {
+      if (bucket.length <= 1) continue;
+      const sorted = [...bucket].sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+        return b.id - a.id;
+      });
+      for (let i = 1; i < sorted.length; i += 1) {
+        await db.deleteTrack(sorted[i].id);
+        cleanedTrackIds.add(sorted[i].id);
+        deduped += 1;
+      }
+    }
+
+    const finalTracks = await db.getAllTracks();
+    for (const track of finalTracks) {
+      if (cleanedTrackIds.has(track.id)) continue;
+      const unknownTitle = !track.title || /^unknown$/i.test(track.title.trim());
+      const unknownArtist = !track.artist || /^unknown artist$/i.test(track.artist.trim());
+      if (!unknownTitle && !unknownArtist) continue;
+
+      const fallback = parseFilenameMetadata(track.filePath);
+      const nextTitle = unknownTitle ? fallback.title : track.title;
+      const nextArtist = unknownArtist ? fallback.artist : track.artist;
+      await db.updateTrackMetadata(track.id, {
+        title: nextTitle || fallbackTitleFromPath(track.filePath),
+        artist: nextArtist ?? null,
+      });
+      repairedMetadata += 1;
+    }
+
+    const refreshed = await db.getAllTracks();
+    setTracks(refreshed);
+    return {
+      libraryCount: refreshed.length,
+      removedInvalid,
+      deduped,
+      relocated,
+      repairedMetadata,
+    };
+  }, [setTracks]);
 
   const startPlayback = useCallback(
     async (showErrorToast = true): Promise<string | null> => {
@@ -266,13 +421,14 @@ export function PlayerShell() {
         const monitoredFolder = await db.getSetting('monitored_folder');
         if (!monitoredFolder) return null;
 
-        const monitoredFiles = await scanFolder(monitoredFolder);
+        const monitoredFiles = (await scanFolder(monitoredFolder))
+          .map(normalizeFileSystemPath)
+          .filter(isImportableMp3Path);
         if (monitoredFiles.length === 0) return null;
 
-        const targetName = getBasename(playbackPath).toLowerCase();
+        const targetName = normalizeLookupValue(getBasename(playbackPath));
         const exactNameMatches = monitoredFiles
-          .map(normalizeFileSystemPath)
-          .filter((file) => getBasename(file).toLowerCase() === targetName);
+          .filter((file) => normalizeLookupValue(getBasename(file)) === targetName);
 
         if (exactNameMatches.length === 1) {
           return exactNameMatches[0];
@@ -295,7 +451,6 @@ export function PlayerShell() {
 
         const artist = currentTrack.artist?.trim().toLowerCase() ?? '';
         const fuzzyMatch = monitoredFiles
-          .map(normalizeFileSystemPath)
           .find((file) => {
             const parsed = parseFilenameMetadata(file);
             const parsedTitle = parsed.title.trim().toLowerCase();
@@ -321,6 +476,9 @@ export function PlayerShell() {
               setTracks(refreshedTracks);
               bytes = await readAudioBytes(playbackPath);
             } else {
+              await db.deleteTrack(currentTrack.id);
+              const refreshedTracks = await db.getAllTracks();
+              setTracks(refreshedTracks);
               loadErrors.push(`fs-read failed (${readError})`);
             }
           } catch (relocateError) {
@@ -383,38 +541,29 @@ export function PlayerShell() {
   // Load library on startup
   useEffect(() => {
     const loadLibrary = async () => {
-      const existingTracks = await db.getAllTracks();
-      const cleanedTrackIds = new Set<number>();
-
-      // Remove stale/unsupported metadata files from previous scans.
-      for (const track of existingTracks) {
-        if (isImportableMp3Path(track.filePath)) continue;
-        await db.deleteTrack(track.id);
-        cleanedTrackIds.add(track.id);
-      }
-
-      // Backfill legacy imports that were stored as "Unknown" before filename fallback.
-      for (const track of existingTracks) {
-        if (cleanedTrackIds.has(track.id)) continue;
-        const unknownTitle = !track.title || /^unknown$/i.test(track.title.trim());
-        const unknownArtist = !track.artist || /^unknown artist$/i.test(track.artist.trim());
-        if (!unknownTitle && !unknownArtist) continue;
-
-        const fallback = parseFilenameMetadata(track.filePath);
-        const nextTitle = unknownTitle ? fallback.title : track.title;
-        const nextArtist = unknownArtist ? fallback.artist : track.artist;
-        await db.updateTrackMetadata(track.id, {
-          title: nextTitle || fallbackTitleFromPath(track.filePath),
-          artist: nextArtist ?? null,
-        });
-      }
-
-      const refreshed = await db.getAllTracks();
-      setTracks(refreshed);
+      await cleanupLibraryRecords();
     };
 
     loadLibrary().catch(console.error);
-  }, [setTracks]);
+  }, [cleanupLibraryRecords]);
+
+  const handleCleanDuplicates = useCallback(async () => {
+    setIsCleaningLibrary(true);
+    setIsScanning(true);
+    try {
+      const summary = await cleanupLibraryRecords();
+      setToast({
+        type: 'success',
+        message: `Library cleaned: ${summary.libraryCount} tracks (${summary.deduped} duplicates removed, ${summary.removedInvalid} invalid removed, ${summary.relocated} paths repaired, ${summary.repairedMetadata} metadata fixed)`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setToast({ type: 'error', message: `Cleanup failed: ${message}` });
+    } finally {
+      setIsCleaningLibrary(false);
+      setIsScanning(false);
+    }
+  }, [cleanupLibraryRecords]);
 
   // Load saved folder setting
   useEffect(() => {
@@ -841,7 +990,11 @@ export function PlayerShell() {
             </div>
           )}
 
-          {activeView === 'library' && <div className="js-active-panel"><Library /></div>}
+          {activeView === 'library' && (
+            <div className="js-active-panel">
+              <Library onCleanDuplicates={handleCleanDuplicates} isCleaning={isCleaningLibrary} />
+            </div>
+          )}
           {activeView === 'playlists' && <div className="js-active-panel"><PlaylistManager /></div>}
         </main>
       </div>
