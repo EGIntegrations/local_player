@@ -12,6 +12,10 @@ export async function readFileBytes(filePath: string): Promise<number[]> {
   return invoke<number[]>('read_file_bytes', { filePath });
 }
 
+export async function pathExists(path: string): Promise<boolean> {
+  return invoke<boolean>('path_exists', { path });
+}
+
 export async function readFileHeader(filePath: string, maxBytes: number = 131072): Promise<number[]> {
   return invoke<number[]>('read_file_header', { filePath, maxBytes });
 }

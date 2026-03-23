@@ -11,7 +11,7 @@ interface PlayerState {
   playbackOrder: Track[];
   playbackIndex: number;
 
-  setCurrentTrack: (track: Track) => void;
+  setCurrentTrack: (track: Track | null) => void;
   setPlaybackContext: (tracks: Track[], startIndex: number) => void;
   advancePlayback: (delta: 1 | -1) => Track | null;
   clearPlaybackContext: () => void;
@@ -36,6 +36,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setCurrentTrack: (track) =>
     set((state) => {
+      if (!track) {
+        return {
+          currentTrack: null,
+          playbackIndex: -1,
+          playbackOrder: [],
+        };
+      }
       const index = state.playbackOrder.findIndex((candidate) => candidate.id === track.id);
       return {
         currentTrack: track,

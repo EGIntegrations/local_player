@@ -16,7 +16,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useUIStore } from '../stores/uiStore';
 import { AudioService } from '../services/audioService';
 import { parseID3Tags } from '../services/id3Parser';
-import { scanFolder, startWatchingFolder, readFileHeader, readFileBytes } from '../services/tauriCommands';
+import { scanFolder, startWatchingFolder, readFileHeader, readFileBytes, pathExists } from '../services/tauriCommands';
 import * as db from '../services/database';
 
 type ToastInfo = { message: string; type: 'success' | 'error' | 'info' };
@@ -93,6 +93,13 @@ function isImportableMp3Path(filePath: string): boolean {
   if (!baseName) return false;
   if (baseName.startsWith('._') || baseName.startsWith('.')) return false;
   return /\.mp3$/i.test(baseName);
+}
+
+function isPathInsideFolder(filePath: string, folderPath: string): boolean {
+  const normalizedFile = normalizeFileSystemPath(filePath).replace(/\\/g, '/');
+  const normalizedFolder = normalizeFileSystemPath(folderPath).replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalizedFolder) return false;
+  return normalizedFile === normalizedFolder || normalizedFile.startsWith(`${normalizedFolder}/`);
 }
 
 function isMissingFileError(message: string): boolean {
@@ -172,11 +179,13 @@ export function PlayerShell() {
   const cleanupLibraryRecords = useCallback(async (): Promise<{
     libraryCount: number;
     removedInvalid: number;
+    removedMissing: number;
     deduped: number;
     relocated: number;
     repairedMetadata: number;
   }> => {
     let removedInvalid = 0;
+    let removedMissing = 0;
     let deduped = 0;
     let relocated = 0;
     let repairedMetadata = 0;
@@ -190,9 +199,10 @@ export function PlayerShell() {
       removedInvalid += 1;
     }
 
-    const monitoredFolder = await db.getSetting('monitored_folder');
+    const monitoredFolder = normalizeFileSystemPath((await db.getSetting('monitored_folder')) ?? '');
+    const monitoredFolderAvailable = monitoredFolder ? await pathExists(monitoredFolder).catch(() => false) : false;
     let monitoredFiles: string[] = [];
-    if (monitoredFolder) {
+    if (monitoredFolder && monitoredFolderAvailable) {
       try {
         monitoredFiles = (await scanFolder(monitoredFolder))
           .map(normalizeFileSystemPath)
@@ -258,6 +268,33 @@ export function PlayerShell() {
       }
     }
 
+    // Prune stale DB entries whose files no longer exist.
+    // If the monitored folder is temporarily offline (external drive), preserve paths under it.
+    const existenceTracks = await db.getAllTracks();
+    for (const track of existenceTracks) {
+      if (cleanedTrackIds.has(track.id)) continue;
+      const normalizedPath = normalizeFileSystemPath(track.filePath);
+      const exists = await pathExists(normalizedPath).catch(() => false);
+      if (exists) continue;
+
+      const preserveForUnmountedMonitoredFolder =
+        monitoredFolder &&
+        !monitoredFolderAvailable &&
+        isPathInsideFolder(normalizedPath, monitoredFolder);
+      if (preserveForUnmountedMonitoredFolder) continue;
+
+      await db.deleteTrack(track.id);
+      cleanedTrackIds.add(track.id);
+      removedMissing += 1;
+
+      const activeTrackId = usePlayerStore.getState().currentTrack?.id;
+      if (activeTrackId === track.id) {
+        audioRef.current?.stop();
+        setPlaying(false);
+        setCurrentTrack(null);
+      }
+    }
+
     const postRepairTracks = await db.getAllTracks();
     const buckets = new Map<string, typeof postRepairTracks>();
     for (const track of postRepairTracks) {
@@ -303,11 +340,12 @@ export function PlayerShell() {
     return {
       libraryCount: refreshed.length,
       removedInvalid,
+      removedMissing,
       deduped,
       relocated,
       repairedMetadata,
     };
-  }, [setTracks]);
+  }, [setCurrentTrack, setPlaying, setTracks]);
 
   const startPlayback = useCallback(
     async (showErrorToast = true): Promise<string | null> => {
@@ -418,8 +456,10 @@ export function PlayerShell() {
       };
 
       const resolveMovedTrackPath = async (): Promise<string | null> => {
-        const monitoredFolder = await db.getSetting('monitored_folder');
+        const monitoredFolder = normalizeFileSystemPath((await db.getSetting('monitored_folder')) ?? '');
         if (!monitoredFolder) return null;
+        const monitoredFolderAvailable = await pathExists(monitoredFolder).catch(() => false);
+        if (!monitoredFolderAvailable) return null;
 
         const monitoredFiles = (await scanFolder(monitoredFolder))
           .map(normalizeFileSystemPath)
@@ -479,6 +519,9 @@ export function PlayerShell() {
               await db.deleteTrack(currentTrack.id);
               const refreshedTracks = await db.getAllTracks();
               setTracks(refreshedTracks);
+              audioRef.current?.stop();
+              setPlaying(false);
+              setCurrentTrack(null);
               loadErrors.push(`fs-read failed (${readError})`);
             }
           } catch (relocateError) {
@@ -554,7 +597,7 @@ export function PlayerShell() {
       const summary = await cleanupLibraryRecords();
       setToast({
         type: 'success',
-        message: `Library cleaned: ${summary.libraryCount} tracks (${summary.deduped} duplicates removed, ${summary.removedInvalid} invalid removed, ${summary.relocated} paths repaired, ${summary.repairedMetadata} metadata fixed)`,
+        message: `Library cleaned: ${summary.libraryCount} tracks (${summary.deduped} duplicates removed, ${summary.removedInvalid} invalid removed, ${summary.removedMissing} missing removed, ${summary.relocated} paths repaired, ${summary.repairedMetadata} metadata fixed)`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

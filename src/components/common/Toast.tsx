@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface ToastProps {
   message: string;
@@ -14,10 +14,16 @@ const variants = {
 };
 
 export function Toast({ message, type, onClose, duration = 3000 }: ToastProps) {
+  const onCloseRef = useRef(onClose);
+
   useEffect(() => {
-    const timer = setTimeout(onClose, duration);
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => onCloseRef.current(), duration);
     return () => clearTimeout(timer);
-  }, [duration, onClose]);
+  }, [duration, message, type]);
 
   return (
     <div

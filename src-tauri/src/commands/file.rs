@@ -45,6 +45,11 @@ pub async fn read_file_bytes(file_path: String) -> Result<Vec<u8>, String> {
     fs::read(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))
 }
 
+#[tauri::command]
+pub async fn path_exists(path: String) -> Result<bool, String> {
+    Ok(Path::new(&path).exists())
+}
+
 /// Read only the first `max_bytes` of a file (for ID3 tag parsing).
 #[tauri::command]
 pub async fn read_file_header(file_path: String, max_bytes: usize) -> Result<Vec<u8>, String> {
