@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-type PlayerMode = 'mini' | 'expanded';
+type PlayerMode = 'mini' | 'expanded' | 'micro';
 type ActiveView = 'player' | 'library' | 'playlists';
 
 interface UIState {
@@ -22,7 +22,7 @@ export const useUIStore = create<UIState>((set) => ({
   setPlayerMode: (mode) => set({ playerMode: mode }),
   togglePlayerMode: () =>
     set((state) => ({
-      playerMode: state.playerMode === 'mini' ? 'expanded' : 'mini',
+      playerMode: state.playerMode === 'expanded' ? 'mini' : 'expanded',
     })),
   setSettingsVisible: (visible) => set({ settingsVisible: visible }),
   setActiveView: (view) => set({ activeView: view }),

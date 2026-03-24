@@ -48,6 +48,7 @@ function normalizeEqState(partial: Partial<EqualizerState> | null | undefined): 
 
 interface SettingsState extends Settings {
   setMonitoredFolder: (folder: string) => void;
+  setActiveLibraryScopeId: (scopeId: string | null) => void;
   setS3Configured: (configured: boolean) => void;
   setDriveConfigured: (configured: boolean) => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -66,6 +67,7 @@ interface SettingsState extends Settings {
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   monitoredFolder: null,
+  activeLibraryScopeId: null,
   s3Configured: false,
   driveConfigured: false,
   themeMode: 'system',
@@ -74,6 +76,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   visualizerColors: { ...DEFAULT_VIS_COLORS },
 
   setMonitoredFolder: (folder) => set({ monitoredFolder: folder }),
+  setActiveLibraryScopeId: (scopeId) => set({ activeLibraryScopeId: scopeId }),
   setS3Configured: (configured) => set({ s3Configured: configured }),
   setDriveConfigured: (configured) => set({ driveConfigured: configured }),
   setThemeMode: (mode) => set({ themeMode: mode }),

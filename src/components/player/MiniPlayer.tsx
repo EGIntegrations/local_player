@@ -3,6 +3,7 @@ import { AlbumArt } from './AlbumArt';
 import { PlaybackControls } from './PlaybackControls';
 import { SeekBar } from './SeekBar';
 import { VolumeControl } from './VolumeControl';
+import { Waveform } from '../visualizations/Waveform';
 
 interface MiniPlayerProps {
   onPlay: () => void;
@@ -11,6 +12,9 @@ interface MiniPlayerProps {
   onPrevious: () => void;
   onSeek: (position: number) => void;
   onVolumeChange: (volume: number) => void;
+  analyser: AnalyserNode | null;
+  visualizerActive: boolean;
+  compact?: boolean;
 }
 
 export function MiniPlayer({
@@ -20,14 +24,42 @@ export function MiniPlayer({
   onPrevious,
   onSeek,
   onVolumeChange,
+  analyser,
+  visualizerActive,
+  compact = false,
 }: MiniPlayerProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
 
   if (!currentTrack) {
     return (
-      <div className="p-8 text-center text-cosmic-light-teal/65">
+      <div className={`${compact ? 'p-3' : 'p-8'} text-center text-cosmic-light-teal/65`}>
         <p>No track playing</p>
         <p className="mt-2 text-sm">Select a track from the library to play</p>
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="space-y-2 p-3">
+        <div className="min-w-0 text-center">
+          <h2 className="truncate text-sm font-semibold text-cosmic-light-teal">{currentTrack.title}</h2>
+          <p className="truncate text-xs text-cosmic-light-teal/75">{currentTrack.artist || 'Unknown Artist'}</p>
+        </div>
+
+        <Waveform analyser={analyser} isPlaying={isPlaying} active={visualizerActive} compact />
+        <SeekBar onSeek={onSeek} />
+
+        <div className="flex items-center justify-between gap-2">
+          <PlaybackControls
+            onPlay={onPlay}
+            onPause={onPause}
+            onNext={onNext}
+            onPrevious={onPrevious}
+          />
+          <VolumeControl onChange={onVolumeChange} />
+        </div>
       </div>
     );
   }

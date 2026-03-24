@@ -8,11 +8,14 @@ import { SeekBar } from './SeekBar';
 import { VolumeControl } from './VolumeControl';
 import { Waveform } from '../visualizations/Waveform';
 import { VUMeters } from '../visualizations/VUMeters';
+import { InputOutputPanel } from '../visualizations/InputOutputPanel';
+import { SpectrumAnalyzer } from '../visualizations/SpectrumAnalyzer';
 
 interface ExpandedPlayerProps {
   analyser: AnalyserNode | null;
   leftAnalyser: AnalyserNode | null;
   rightAnalyser: AnalyserNode | null;
+  visualizerActive: boolean;
   equalizer: EqualizerState;
   onPlay: () => void;
   onPause: () => void;
@@ -82,6 +85,7 @@ export function ExpandedPlayer({
   analyser,
   leftAnalyser,
   rightAnalyser,
+  visualizerActive,
   equalizer,
   onPlay,
   onPause,
@@ -127,8 +131,8 @@ export function ExpandedPlayer({
         </div>
 
         <div className="js-expand-surface space-y-4">
-          <Waveform analyser={null} isPlaying={false} />
-          <VUMeters analyser={null} leftAnalyser={null} rightAnalyser={null} isPlaying={false} />
+          <Waveform analyser={null} isPlaying={false} active={visualizerActive} />
+          <VUMeters analyser={null} leftAnalyser={null} rightAnalyser={null} isPlaying={false} active={visualizerActive} />
         </div>
 
         <div className="text-center">
@@ -173,8 +177,24 @@ export function ExpandedPlayer({
 
       {/* Visualizations */}
       <div className="js-expand-surface space-y-4 rounded-lg border border-cosmic-light-teal/20 bg-cosmic-teal/10 p-4">
-        <Waveform analyser={analyser} isPlaying={isPlaying} />
-        <VUMeters analyser={analyser} leftAnalyser={leftAnalyser} rightAnalyser={rightAnalyser} isPlaying={isPlaying} />
+        <Waveform analyser={analyser} isPlaying={isPlaying} active={visualizerActive} />
+        <div className="grid gap-3 lg:grid-cols-2">
+          <VUMeters
+            analyser={analyser}
+            leftAnalyser={leftAnalyser}
+            rightAnalyser={rightAnalyser}
+            isPlaying={isPlaying}
+            active={visualizerActive}
+          />
+          <InputOutputPanel
+            analyser={analyser}
+            isPlaying={isPlaying}
+            active={visualizerActive}
+            preampDb={equalizer.preampDb}
+            output={equalizer.output}
+          />
+        </div>
+        <SpectrumAnalyzer analyser={analyser} isPlaying={isPlaying} active={visualizerActive} />
       </div>
 
       <div className="js-expand-surface sk-panel sk-eq-panel p-4">

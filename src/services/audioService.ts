@@ -2,6 +2,17 @@ import { Howl, Howler } from 'howler';
 import type { EqualizerState } from '../types/settings';
 
 const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const LEVEL_BUFFER_SIZE = 1024;
+
+export type AudioSourceKind = 'asset' | 'blob';
+
+export interface PlaybackDiagnostics {
+  loadCount: number;
+  fallbackCount: number;
+  lastSource: AudioSourceKind | null;
+  lastLoadMs: number;
+  activeBlobCount: number;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -34,6 +45,14 @@ export class AudioService {
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private sourceNodeByElement = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
   private loadSequence = 0;
+  private levelBuffer = new Uint8Array(LEVEL_BUFFER_SIZE);
+  private diagnostics: PlaybackDiagnostics = {
+    loadCount: 0,
+    fallbackCount: 0,
+    lastSource: null,
+    lastLoadMs: 0,
+    activeBlobCount: 0,
+  };
   private eqState: EqualizerState = {
     bands: [...EQ_FREQUENCIES.map(() => 0)],
     preampDb: 0,
@@ -54,6 +73,14 @@ export class AudioService {
       left: this.leftAnalyser,
       right: this.rightAnalyser,
     };
+  }
+
+  getDiagnostics(): PlaybackDiagnostics {
+    return { ...this.diagnostics };
+  }
+
+  setActiveBlobCount(count: number) {
+    this.diagnostics.activeBlobCount = Math.max(0, Number.isFinite(count) ? Math.round(count) : 0);
   }
 
   private emitDebug(message: string) {
@@ -177,10 +204,19 @@ export class AudioService {
     }
   }
 
-  async loadTrack(url: string): Promise<void> {
+  async loadTrack(url: string, sourceKind: AudioSourceKind = 'asset'): Promise<void> {
     const loadId = ++this.loadSequence;
+    const startedAt = performance.now();
+    this.diagnostics.loadCount += 1;
+    this.diagnostics.lastSource = sourceKind;
+    if (sourceKind === 'blob') {
+      this.diagnostics.fallbackCount += 1;
+    }
+
     if (this.currentHowl) {
+      this.currentHowl.stop();
       this.currentHowl.unload();
+      this.currentHowl = null;
       this.clearProgressInterval();
     }
 
@@ -192,11 +228,21 @@ export class AudioService {
     for (const html5 of html5Order) {
       try {
         await this.loadHowl(url, html5, loadId);
+        this.diagnostics.lastLoadMs = Math.round(performance.now() - startedAt);
+        if (import.meta.env.DEV) {
+          const d = this.diagnostics;
+          this.emitDebug(
+            `diag: source=${sourceKind} loadMs=${d.lastLoadMs} fallbackCount=${d.fallbackCount} blobs=${d.activeBlobCount}`
+          );
+        }
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`html5=${html5} ${message}`);
-        this.currentHowl?.unload();
+        const staleHowl = this.currentHowl;
+        if (staleHowl) {
+          (staleHowl as any).unload?.();
+        }
         this.currentHowl = null;
       }
     }
@@ -368,6 +414,48 @@ export class AudioService {
     return this.currentHowl?.duration() ?? 0;
   }
 
+  getOutputLevel(): number {
+    if (!this.analyser) return 0;
+    if (this.levelBuffer.length !== this.analyser.fftSize) {
+      this.levelBuffer = new Uint8Array(this.analyser.fftSize);
+    }
+    this.analyser.getByteTimeDomainData(this.levelBuffer);
+    let sumSquares = 0;
+    for (let i = 0; i < this.levelBuffer.length; i += 1) {
+      const sample = (this.levelBuffer[i] - 128) / 128;
+      sumSquares += sample * sample;
+    }
+    const rms = Math.sqrt(sumSquares / this.levelBuffer.length);
+    return clamp(rms * 4.2, 0, 1);
+  }
+
+  isOutputClipping(threshold = 0.985): boolean {
+    if (!this.analyser) return false;
+    if (this.levelBuffer.length !== this.analyser.fftSize) {
+      this.levelBuffer = new Uint8Array(this.analyser.fftSize);
+    }
+    this.analyser.getByteTimeDomainData(this.levelBuffer);
+    for (let i = 0; i < this.levelBuffer.length; i += 1) {
+      const sample = Math.abs((this.levelBuffer[i] - 128) / 128);
+      if (sample >= threshold) return true;
+    }
+    return false;
+  }
+
+  fillSpectrumData(target: Uint8Array): number {
+    if (!this.analyser) return 0;
+    const size = Math.min(target.length, this.analyser.frequencyBinCount);
+    if (size <= 0) return 0;
+    if (target.length !== this.analyser.frequencyBinCount) {
+      const tmp = new Uint8Array(this.analyser.frequencyBinCount);
+      this.analyser.getByteFrequencyData(tmp);
+      target.set(tmp.subarray(0, size), 0);
+      return size;
+    }
+    this.analyser.getByteFrequencyData(target);
+    return size;
+  }
+
   setVolume(volume: number) {
     this._volume = Math.max(0, Math.min(1, volume));
     if (this.currentHowl) {
@@ -453,5 +541,7 @@ export class AudioService {
     this.leftAnalyser = null;
     this.rightAnalyser = null;
     this.sourceNode = null;
+    this.levelBuffer = new Uint8Array(LEVEL_BUFFER_SIZE);
+    this.diagnostics.activeBlobCount = 0;
   }
 }

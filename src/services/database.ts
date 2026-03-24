@@ -11,12 +11,34 @@ async function getDb(): Promise<Database> {
   return db;
 }
 
+function normalizeFilePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
+function toPathKey(filePath: string): string {
+  return normalizeFilePath(filePath).trim().toLowerCase();
+}
+
 // --- Tracks ---
 
 export async function getAllTracks(): Promise<Track[]> {
   const conn = await getDb();
   const rows = await conn.select<Track[]>(
     'SELECT id, title, artist, album, year, genre, duration, file_path as filePath, source, album_art_url as albumArtUrl, created_at as createdAt, updated_at as updatedAt FROM tracks ORDER BY title'
+  );
+  return rows;
+}
+
+export async function getTracksByScope(scopeId: string): Promise<Track[]> {
+  const conn = await getDb();
+  const rows = await conn.select<Track[]>(
+    `SELECT id, title, artist, album, year, genre, duration,
+            file_path as filePath, source, album_art_url as albumArtUrl,
+            created_at as createdAt, updated_at as updatedAt
+     FROM tracks
+     WHERE library_scope_id = ?
+     ORDER BY title`,
+    [scopeId]
   );
   return rows;
 }
@@ -29,14 +51,49 @@ export async function addTrack(params: {
   genre: string | null;
   duration: number | null;
   filePath: string;
+  libraryScopeId: string;
   source: 'local' | 's3' | 'drive';
   albumArtUrl: string | null;
 }): Promise<number> {
   const conn = await getDb();
   const now = Math.floor(Date.now() / 1000);
+  const normalizedPath = normalizeFilePath(params.filePath);
+  const pathKey = toPathKey(normalizedPath);
+
+  const existingByKey = await conn.select<{ id: number }[]>(
+    'SELECT id FROM tracks WHERE file_path_key = ? LIMIT 1',
+    [pathKey]
+  );
+  if (existingByKey.length > 0) {
+    const existingId = existingByKey[0].id;
+    await conn.execute(
+      `UPDATE tracks
+       SET title = ?, artist = ?, album = ?, year = ?, genre = ?, duration = ?,
+           file_path = ?, file_path_key = ?, library_scope_id = ?, source = ?, album_art_url = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        params.title,
+        params.artist,
+        params.album,
+        params.year,
+        params.genre,
+        params.duration,
+        normalizedPath,
+        pathKey,
+        params.libraryScopeId,
+        params.source,
+        params.albumArtUrl,
+        now,
+        existingId,
+      ]
+    );
+    return existingId;
+  }
+
   const result = await conn.execute(
-    `INSERT INTO tracks (title, artist, album, year, genre, duration, file_path, source, album_art_url, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks
+       (title, artist, album, year, genre, duration, file_path, file_path_key, library_scope_id, source, album_art_url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       params.title,
       params.artist,
@@ -44,7 +101,9 @@ export async function addTrack(params: {
       params.year,
       params.genre,
       params.duration,
-      params.filePath,
+      normalizedPath,
+      pathKey,
+      params.libraryScopeId,
       params.source,
       params.albumArtUrl,
       now,
@@ -74,17 +133,26 @@ export async function updateTrackMetadata(
 export async function updateTrackFilePath(trackId: number, filePath: string): Promise<void> {
   const conn = await getDb();
   const now = Math.floor(Date.now() / 1000);
+  const normalizedPath = normalizeFilePath(filePath);
+  const pathKey = toPathKey(normalizedPath);
   await conn.execute(
-    'UPDATE tracks SET file_path = ?, updated_at = ? WHERE id = ?',
-    [filePath, now, trackId]
+    'UPDATE tracks SET file_path = ?, file_path_key = ?, updated_at = ? WHERE id = ?',
+    [normalizedPath, pathKey, now, trackId]
   );
 }
 
 export async function getTrackByFilePath(filePath: string): Promise<Track | null> {
   const conn = await getDb();
+  const normalizedPath = normalizeFilePath(filePath);
+  const pathKey = toPathKey(normalizedPath);
   const rows = await conn.select<Track[]>(
-    'SELECT id, title, artist, album, year, genre, duration, file_path as filePath, source, album_art_url as albumArtUrl, created_at as createdAt, updated_at as updatedAt FROM tracks WHERE file_path = ?',
-    [filePath]
+    `SELECT id, title, artist, album, year, genre, duration,
+            file_path as filePath, source, album_art_url as albumArtUrl,
+            created_at as createdAt, updated_at as updatedAt
+     FROM tracks
+     WHERE file_path = ? OR file_path_key = ?
+     LIMIT 1`,
+    [normalizedPath, pathKey]
   );
   return rows.length > 0 ? rows[0] : null;
 }

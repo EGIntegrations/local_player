@@ -15,6 +15,7 @@ export interface VisualizerColors {
 
 export interface Settings {
   monitoredFolder: string | null;
+  activeLibraryScopeId: string | null;
   s3Configured: boolean;
   driveConfigured: boolean;
   themeMode: ThemeMode;
