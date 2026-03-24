@@ -12,22 +12,48 @@ const KEY_EMAIL = 'license_email';
 const KEY_INSTANCE_ID = 'license_instance_id';
 const KEY_DEVICE_ID = 'license_device_id';
 const KEY_LAST_VALIDATED_AT = 'license_last_validated_at';
+const FALLBACK_DEVICE_ID_STORAGE_KEY = 'local_player_device_id';
 const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function formatDateTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString();
 }
 
-async function getOrCreateDeviceId(): Promise<string> {
-  const existing = await db.getSetting(KEY_DEVICE_ID);
-  if (existing) return existing;
+function createRandomDeviceId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
-  const created =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  await db.setSetting(KEY_DEVICE_ID, created);
-  return created;
+function getBrowserFallbackDeviceId(): string {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return createRandomDeviceId();
+    }
+    const existing = window.localStorage.getItem(FALLBACK_DEVICE_ID_STORAGE_KEY);
+    if (existing && existing.trim()) return existing;
+    const created = createRandomDeviceId();
+    window.localStorage.setItem(FALLBACK_DEVICE_ID_STORAGE_KEY, created);
+    return created;
+  } catch {
+    return createRandomDeviceId();
+  }
+}
+
+async function getOrCreateDeviceId(): Promise<string> {
+  try {
+    const existing = await db.getSetting(KEY_DEVICE_ID);
+    if (existing && existing.trim()) return existing;
+    const created = getBrowserFallbackDeviceId();
+    try {
+      await db.setSetting(KEY_DEVICE_ID, created);
+    } catch {
+      // Keep fallback-only device id if DB is unavailable.
+    }
+    return created;
+  } catch {
+    return getBrowserFallbackDeviceId();
+  }
 }
 
 interface LicenseGateProps {
@@ -149,10 +175,6 @@ export function LicenseGate({ children }: LicenseGateProps) {
       setError('Enter your license key.');
       return;
     }
-    if (!deviceId) {
-      setError('Device identity is not ready. Try again.');
-      return;
-    }
     if (!apiConfigured) {
       setError('VITE_LICENSE_API_BASE is not configured.');
       return;
@@ -162,10 +184,20 @@ export function LicenseGate({ children }: LicenseGateProps) {
     setError(null);
     setMessage(null);
     try {
+      let resolvedDeviceId = deviceId;
+      if (!resolvedDeviceId) {
+        resolvedDeviceId = await getOrCreateDeviceId();
+        setDeviceId(resolvedDeviceId);
+      }
+      if (!resolvedDeviceId) {
+        setError('Device identity is not ready. Try again.');
+        return;
+      }
+
       const result = await activateLicense({
         licenseKey,
         email,
-        instanceName: `local-player-${deviceId}`,
+        instanceName: `local-player-${resolvedDeviceId}`,
         instanceId,
       });
       if (!result.ok || !result.valid) {

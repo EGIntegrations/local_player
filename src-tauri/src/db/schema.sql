@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS tracks (
   genre TEXT,
   duration INTEGER,
   file_path TEXT NOT NULL,
-  file_path_key TEXT NOT NULL,
-  library_scope_id TEXT NOT NULL,
   source TEXT NOT NULL CHECK(source IN ('local', 's3', 'drive')),
   album_art_url TEXT,
   created_at INTEGER NOT NULL,
@@ -18,8 +16,6 @@ CREATE TABLE IF NOT EXISTS tracks (
 CREATE INDEX IF NOT EXISTS idx_tracks_source ON tracks(source);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
-CREATE INDEX IF NOT EXISTS idx_tracks_scope ON tracks(library_scope_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_file_path_key_unique ON tracks(file_path_key);
 
 CREATE TABLE IF NOT EXISTS playlists (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
