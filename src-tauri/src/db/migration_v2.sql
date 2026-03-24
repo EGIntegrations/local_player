@@ -1,5 +1,4 @@
 PRAGMA foreign_keys=OFF;
-BEGIN;
 
 ALTER TABLE tracks ADD COLUMN file_path_key TEXT;
 ALTER TABLE tracks ADD COLUMN library_scope_id TEXT NOT NULL DEFAULT 'legacy';
@@ -41,5 +40,4 @@ DROP TABLE _track_keep;
 CREATE INDEX IF NOT EXISTS idx_tracks_scope ON tracks(library_scope_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_file_path_key_unique ON tracks(file_path_key);
 
-COMMIT;
 PRAGMA foreign_keys=ON;
