@@ -99,6 +99,30 @@ function scopeIdFromFolderPath(folderPath: string): string {
   return `folder:${toFilePathKey(folderPath)}`;
 }
 
+function getAudioFormatHints(filePath: string): string[] {
+  const match = /\.([a-z0-9]+)$/i.exec(filePath.trim());
+  const ext = (match?.[1] ?? 'mp3').toLowerCase();
+  if (ext === 'mp3') return ['mp3'];
+  if (ext === 'm4a') return ['m4a', 'mp4'];
+  if (ext === 'aac') return ['aac', 'm4a', 'mp4'];
+  if (ext === 'wav') return ['wav'];
+  if (ext === 'ogg') return ['ogg', 'oga'];
+  if (ext === 'flac') return ['flac'];
+  return [ext];
+}
+
+function getAudioMimeType(filePath: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(filePath.trim());
+  const ext = (match?.[1] ?? 'mp3').toLowerCase();
+  if (ext === 'mp3') return 'audio/mpeg';
+  if (ext === 'm4a') return 'audio/mp4';
+  if (ext === 'aac') return 'audio/aac';
+  if (ext === 'wav') return 'audio/wav';
+  if (ext === 'ogg') return 'audio/ogg';
+  if (ext === 'flac') return 'audio/flac';
+  return 'audio/mpeg';
+}
+
 function isWindowBounds(value: unknown): value is WindowBounds {
   if (!value || typeof value !== 'object') return false;
   const maybe = value as Partial<WindowBounds>;
@@ -186,7 +210,7 @@ export function PlayerShell() {
   const resetEq = useSettingsStore((s) => s.resetEq);
   const visualizerColors = useSettingsStore((s) => s.visualizerColors);
   const setVisualizerColors = useSettingsStore((s) => s.setVisualizerColors);
-  const { activeView, setActiveView, setSettingsVisible, togglePlayerMode, playerMode, setPlayerMode } = useUIStore();
+  const { activeView, setActiveView, setSettingsVisible, playerMode, setPlayerMode } = useUIStore();
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isCleaningLibrary, setIsCleaningLibrary] = useState(false);
@@ -465,6 +489,7 @@ export function PlayerShell() {
       setProgress(0);
       setDuration(0);
       revokePlaybackBlobUrl();
+      let formatHints = getAudioFormatHints(playbackPath);
 
       const readAudioBytes = async (filePath: string): Promise<Uint8Array> => {
         try {
@@ -537,6 +562,7 @@ export function PlayerShell() {
           const relocatedPath = await resolveMovedTrackPath();
           if (relocatedPath) {
             playbackPath = relocatedPath;
+            formatHints = getAudioFormatHints(playbackPath);
             await db.updateTrackFilePath(currentTrack.id, relocatedPath);
             setCurrentTrack({ ...currentTrack, filePath: relocatedPath });
             await refreshVisibleLibrary();
@@ -563,7 +589,7 @@ export function PlayerShell() {
           return { ok: false, error: 'stale request' };
         }
         try {
-          await audioRef.current.loadTrack(source.url, source.kind);
+          await audioRef.current.loadTrack(source.url, source.kind, formatHints);
           if (cancelled || !audioRef.current || requestId !== playbackRequestRef.current) {
             return { ok: false, error: 'stale request' };
           }
@@ -590,7 +616,7 @@ export function PlayerShell() {
         const bytes = await readAudioBytes(playbackPath);
         if (cancelled || requestId !== playbackRequestRef.current) return;
         revokePlaybackBlobUrl();
-        const audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
+        const audioBlob = new Blob([bytes], { type: getAudioMimeType(playbackPath) });
         playbackBlobUrlRef.current = URL.createObjectURL(audioBlob);
         audioRef.current?.setActiveBlobCount(1);
 
@@ -1168,11 +1194,6 @@ export function PlayerShell() {
   const handleEqReset = useCallback(() => {
     resetEq();
   }, [resetEq]);
-  const handleToggleMicroMode = useCallback(() => {
-    setActiveView('player');
-    setPlayerMode(playerMode === 'micro' ? 'mini' : 'micro');
-  }, [playerMode, setActiveView, setPlayerMode]);
-
   useEffect(() => {
     if (!shellRef.current) return;
     const surfaces = shellRef.current.querySelectorAll<HTMLElement>('.js-surface');
@@ -1233,17 +1254,15 @@ export function PlayerShell() {
             <button
               onClick={() => {
                 setActiveView('player');
-                togglePlayerMode();
+                if (playerMode === 'expanded') {
+                  setPlayerMode('micro');
+                } else {
+                  setPlayerMode('expanded');
+                }
               }}
               className="terminal-btn px-4 py-2"
             >
               {playerMode === 'expanded' ? 'Minimize' : 'Expand'}
-            </button>
-            <button
-              onClick={handleToggleMicroMode}
-              className={`terminal-btn px-4 py-2 ${playerMode === 'micro' ? 'terminal-btn-primary' : ''}`}
-            >
-              {playerMode === 'micro' ? 'Exit Micro' : 'Micro'}
             </button>
             <button
               onClick={() => setSettingsVisible(true)}

@@ -204,7 +204,11 @@ export class AudioService {
     }
   }
 
-  async loadTrack(url: string, sourceKind: AudioSourceKind = 'asset'): Promise<void> {
+  async loadTrack(
+    url: string,
+    sourceKind: AudioSourceKind = 'asset',
+    formatHints: string[] = []
+  ): Promise<void> {
     const loadId = ++this.loadSequence;
     const startedAt = performance.now();
     this.diagnostics.loadCount += 1;
@@ -227,7 +231,7 @@ export class AudioService {
 
     for (const html5 of html5Order) {
       try {
-        await this.loadHowl(url, html5, loadId);
+        await this.loadHowl(url, html5, loadId, formatHints);
         this.diagnostics.lastLoadMs = Math.round(performance.now() - startedAt);
         if (import.meta.env.DEV) {
           const d = this.diagnostics;
@@ -250,10 +254,16 @@ export class AudioService {
     throw new Error(failures.join(' | '));
   }
 
-  private async loadHowl(url: string, html5: boolean, loadId: number): Promise<void> {
+  private async loadHowl(
+    url: string,
+    html5: boolean,
+    loadId: number,
+    formatHints: string[]
+  ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const howl = new Howl({
         src: [url],
+        format: formatHints.length > 0 ? formatHints : undefined,
         html5,
         volume: this._volume,
         onload: () => {
