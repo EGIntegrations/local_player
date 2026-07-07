@@ -24,3 +24,9 @@ dist-ssr
 *.sln
 *.sw?
 music/
+media/
+
+# Environment
+.env
+.env.local
+.env.*.local
